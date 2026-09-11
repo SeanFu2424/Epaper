@@ -342,16 +342,11 @@ static void renderPage(int idx) {
         snprintf(rbuf, sizeof(rbuf), "CLM %d.%d", length10 / 10, length10 % 10);
         ralignPrint(y, rbuf);
 
-        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），
+        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7，保留小数点），
         // 右列 = 坡度百分比 + 难度星级（如 "9.1% ★★★★★"；爬升高度不上屏）
-        // 紧凑公里数：整数不写 .0（45 km 而非 45.0 km），给右列腾空间
         y += gap;
         uint16_t endKm10 = km10 + length10;          // 定点整数相加，零浮点
-        if (endKm10 % 10 == 0) {
-          snprintf(kmbuf, sizeof(kmbuf), "%d km", endKm10 / 10);
-        } else {
-          snprintf(kmbuf, sizeof(kmbuf), "%.1f km", endKm10 / 10.0);
-        }
+        snprintf(kmbuf, sizeof(kmbuf), "%.1f km", endKm10 / 10.0);
         display.setCursor(MARGIN + SUB_INDENT, y);   // 缩进 = 从属于上面那行
         display.print(kmbuf);
 

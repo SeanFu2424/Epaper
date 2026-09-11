@@ -65,7 +65,10 @@ ARROW_BYTES = ARROW * ((ARROW + 7) // 8)
 # ★ 在 U+2605，字体里没有（只覆盖 ASCII 0x20-0x7E），
 #   所以和箭头一样用数学方法画成 1-bit 位图，PC 与 ESP32 共用同一份数据。
 STAR = 13              # 单颗星位图边长（12px 尖角糊成一团；13px 是 9pt 字高附近的甜点）
-STAR_GAP = 2           # 星与星的间距
+STAR_GAP = 0           # 星与星的间距。0 = 紧贴。
+                       # 爬坡第二行 = 结束公里数(含 .0) + 坡度% + 5星，右列很宽；
+                       # 5星 gap=2 时和左列只差 -1px（撞），gap=1 仍只有 3px（太贴），
+                       # gap=0 余 7px。13px 的星本身有约 1px 留白，gap=0 视觉上仍分得清颗数。
 STAR_MAX = 5
 STAR_INNER = 0.45      # 内半径/外半径。标准五角星是 0.382（很尖），
                        # 但 13px 下尖角会糊，0.45 更饱满、更认得出是星星
@@ -266,15 +269,6 @@ def fmt_km(km):
     return "%.1f%s" % (float(km), KM_SUFFIX)
 
 
-def fmt_km_compact(km):
-    """公里数紧凑格式：整数无小数点（45 不写 45.0），小数保留一位。给爬坡第二行的
-    结束公里数用 —— 它要跟"星级 + 坡度%"挤在一行，省点像素是点。"""
-    v = float(km)
-    if v == int(v):
-        return "%d%s" % (int(v), KM_SUFFIX)
-    return "%.1f%s" % (v, KM_SUFFIX)
-
-
 # ---- 爬坡难度星级（规则抄 dincalculator 官网，不是拍脑袋）----
 #   1★ 温和   3-4%
 #   2★ 中等
@@ -331,10 +325,9 @@ def event_rows(ev):
         grade = ev.get("grade")
         grade_txt = "%.1f%%" % float(grade) if grade not in (None, "") else None
         end_km = float(ev["km"]) + float(ev.get("length", 0))
-        # 爬坡第二行左列用紧凑公里数格式（整数不写 .0），腾出空间给右列"星 + 坡度%"
-        end_km_str = fmt_km_compact(end_km)
+        # 爬坡第二行左列 = 结束公里数（保留小数点，如 45.0 km）
         return [{"left": km, "right": r1, "arrow": None, "stars": 0, "sub": False},
-                {"left": end_km_str, "right": grade_txt, "arrow": None,
+                {"left": fmt_km(end_km), "right": grade_txt, "arrow": None,
                  "stars": stars, "sub": True}]
     raise ValueError(t)
 
