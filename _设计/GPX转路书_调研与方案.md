@@ -224,6 +224,85 @@ GPX 的 `<ele>` 有 GPS/气压计噪声，逐点累加会算出**几百米根本
 
 ---
 
+## 六、对照产品：dincalculator「Cycling Route Card Generator」（2026-09-11 追加）
+
+> 用户实测反馈：生成的卡片"**基本达到我要的效果**"——有**爬坡信息、难度、补给信息**；
+> 缺道路名（**用户认为不重要**）。用户在网站上**手工填了体重和功率(FTP)**。
+> 下面规则**全部来自官网页面原文**（事实）。
+
+### 6.1 完整流程
+
+1. 上传 GPX（Komoot / Strava / Garmin / Wahoo 均可）
+2. 填：**体重 + 车重** + **速度估算方式**（三选一）
+   - 平均配速 / **FTP（物理模型逐段算）** / 从 GPS 记录（**需 GPX 带时间戳**）
+   - 可选路面类型（road / gravel / MTB / cobbles → 能耗系数 +0 / +15% / +28% / +20%）
+3. 物理模型逐段算功率 → 检测爬坡 → 排补给点
+4. 输出**可打印的网页**（280px = 7cm 宽），打印后贴把立
+
+### 6.2 输出元素
+
+| 符号 | 含义 | 规则 |
+|---|---|---|
+| ▲ | 爬坡起点 | 自动检测 **≥4% 持续 300m+** |
+| ◆ | GEL 吃胶 | 见 6.3 |
+| ● | H₂O 饮水 | 每 **15 km**（<60km 路线）或 **20 km**；提醒"距上个水点已喝 500ml" |
+| ½ | 中点 | 仅 Detailed 模式 |
+| 🏁 | 终点 | 总距离 |
+
+**爬坡星级**：1★ 温和(3-4%,短) · 2★ 中等 · 3★ 扎实(5-7%, 2km+) ·
+4★ 难(7-9%, 3km+) · 5★ 残酷(9%+ 或 7km+)
+
+### 6.3 ⭐ 补给点放置规则（官网原话 —— **这就是我们要抄的**）
+
+> "Without FTP: gel stops are placed at fixed distance intervals (**every 30 or 35 km**)
+> or at hourly boundaries (**every 45 min** mode). **With FTP: gel stops are placed when your
+> cumulative energy expenditure reaches ~300 kcal since the last gel**, so stops come closer
+> together on hard climbs and further apart on easy terrain. **In both modes, if a rated
+> climb (3★ or higher) starts within 8 km of a planned gel stop, the stop is automatically
+> shifted 3 km before the climb.** This is the golden rule of race nutrition: eat before
+> the hard effort, not during it, your gut shuts down at high intensity."
+
+译为可实现的规则：
+
+- **无 FTP**：固定距离每 **30 或 35 km** 一个胶；或按小时（**45 分钟**模式）
+- **有 FTP**：自上一个胶起**累计消耗 ≈300 kcal** 就放一个 → 爬坡时密、平路时疏（真正的负荷驱动）
+- **两种模式通用 · 黄金规则**：若 **3★ 及以上**爬坡起点落在计划胶点 **8 km 内**
+  → 胶点**自动前移 3 km**（保证"爬坡前吃，别在爬坡中吃"）
+
+→ **直接抄进 `Fueling Engine`**：`300 kcal 阈值` + `3★爬坡前 3km 前移` 这两条。
+比"每 45 分钟一次"更聪明，且已被真实产品验证。
+
+### 6.4 ⚠️ 关键限制：**不能导出数据**
+
+页面翻遍**没有 JSON / CSV / API / 下载按钮**，输出只有可打印网页。
+- ❌ 不能直接进我们的流水线
+- ✅ 定位为**对照标准 + 规则来源**（是"参考答案"，不是"数据源"）
+
+### 6.5 真实 GPX 实测（用户提供的 `在覆卮山燃烧.gpx`，Strava 导出）
+
+用新工具 `tools/gpx_stats.py` 跑出（事实）：
+
+| 项 | 值 |
+|---|---|
+| 轨迹点数 | 1923 |
+| 总距离 | **90.37 km** |
+| 海拔范围 | 10 ~ 616 m |
+| 原始累积爬升 | **+1237 m** |
+| 平滑 w=15 / 31 / 51 / 101 | +1036 / **+969** / +922 / +830 m |
+| 时间戳 | **0 个**（无） |
+| 内置航点 wpt / rtept | **0 / 0**（无） |
+
+**三条结论**：
+1. ⚠️ **无时间戳** → dincalculator 上必须手填均速或 FTP（"从 GPS 记录"这档用不了）
+2. ⚠️ **无内置航点** → 证实「Strava 导出的 GPX 不含提示点」，**算法提取是唯一路**。
+   （上一轮我标的"路线规划器可能内置提示点"这个推断，**对 Strava 导出不成立**）
+3. 原始 vs 平滑差 **200~400 m** → **实证"高程必须平滑"**；窗口选择直接影响爬升数字，
+   待用 Strava 页面显示的爬升值做基准校准。
+
+**新增工具**：`tools/gpx_stats.py`（GPX 体检：点数 / 距离 / 爬升对比 / 时间戳 / 航点）
+
+---
+
 ## 六、GPT 建议评估 + 燃料引擎（Fueling Engine）（2026-09-11 补充）
 
 用户贴了另一个 AI（GPT）的补给算法建议让我评估。核心论点：**GLU 不该建模成
