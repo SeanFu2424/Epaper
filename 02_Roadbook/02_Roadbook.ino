@@ -2,7 +2,8 @@
  * Roadbook —— 6 种事件，左右两列，爬坡占两行
  *
  * 本版新增（2026-09-11 第二轮）：
- *   1. 爬坡第二行的右列："+237m 6.1%" 改成【难度星级】位图（爬升/坡度不上屏）
+ *   1. 爬坡第二行的右列：改成【坡度百分比 + 难度星级】（如 "9.1% ★★★★★"），
+ *      爬升高度不上屏，坡度百分比保留
  *   2. 新增 HALFWAY 事件（路线中点提示）
  *   3. 不再有补水（H2O）事件 —— 补给统一显示 GLU
  *   星级和箭头一样是自制 1-bit 位图（字体只覆盖 ASCII，画不出 ★）
@@ -145,8 +146,9 @@ static inline void ralignPrint(int16_t y, const char *s) {
 }
 
 // 星级：右对齐画 n 颗星（y = 该行基线；位图和箭头同一套机制）
-static void drawStars(int16_t y, uint8_t n) {
-  if (n == 0) return;
+// 返回星占用的总宽度（px），供"星 + 坡度文字"组合排版用
+static int drawStars(int16_t y, uint8_t n) {
+  if (n == 0) return 0;
   if (n > 5) n = 5;
   int w = n * RB_STAR_SIZE + (n - 1) * RB_STAR_GAP;
   int x0 = EPD_W - MARGIN - w;
@@ -155,6 +157,25 @@ static void drawStars(int16_t y, uint8_t n) {
                        y - RB_STAR_SIZE + 1,
                        RB_STAR, RB_STAR_SIZE, RB_STAR_SIZE, GxEPD_BLACK);
   }
+  return w;
+}
+
+// 爬坡第二行右列：坡度百分比 + 难度星级，一起右对齐（如 "9.1% ★★★★★"）。
+// 星画在最右，坡度文字紧贴在星左侧。
+static void drawGradeStars(int16_t y, int16_t grade10, uint8_t n) {
+  if (n > 5) n = 5;
+  char gbuf[8];
+  snprintf(gbuf, sizeof(gbuf), "%d.%d%%", abs(grade10) / 10, abs(grade10) % 10);
+  int star_w = n * RB_STAR_SIZE + (n - 1) * RB_STAR_GAP;
+  int16_t bx, by; uint16_t bw, bh;
+  display.getTextBounds(gbuf, 0, 0, &bx, &by, &bw, &bh);
+  int txt_w = bw + bx;
+  const int GAP_TXT = 4;
+  // 坡度文字右边缘 = 星左边缘 - GAP_TXT
+  display.setCursor(EPD_W - MARGIN - star_w - GAP_TXT - txt_w, y);
+  display.print(gbuf);
+  // 星照旧右对齐画在最右
+  drawStars(y, n);
 }
 
 // ---- 状态栏数据：时间（RTC PCF85063） + 电量（ADC） ----
@@ -321,15 +342,21 @@ static void renderPage(int idx) {
         snprintf(rbuf, sizeof(rbuf), "CLM %d.%d", length10 / 10, length10 % 10);
         ralignPrint(y, rbuf);
 
-        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），右列 = 难度星级
-        // （爬升/坡度不再上屏：200px 宽塞不下，且骑的时候看星级就够了）
+        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），
+        // 右列 = 坡度百分比 + 难度星级（如 "9.1% ★★★★★"；爬升高度不上屏）
+        // 紧凑公里数：整数不写 .0（45 km 而非 45.0 km），给右列腾空间
         y += gap;
         uint16_t endKm10 = km10 + length10;          // 定点整数相加，零浮点
-        snprintf(kmbuf, sizeof(kmbuf), "%.1f km", endKm10 / 10.0);
+        if (endKm10 % 10 == 0) {
+          snprintf(kmbuf, sizeof(kmbuf), "%d km", endKm10 / 10);
+        } else {
+          snprintf(kmbuf, sizeof(kmbuf), "%.1f km", endKm10 / 10.0);
+        }
         display.setCursor(MARGIN + SUB_INDENT, y);   // 缩进 = 从属于上面那行
         display.print(kmbuf);
 
-        drawStars(y, pgm_read_byte(&RB_EVENTS[i].stars));
+        drawGradeStars(y, (int16_t)pgm_read_word(&RB_EVENTS[i].grade),
+                       pgm_read_byte(&RB_EVENTS[i].stars));
       }
       y += gap;
     }

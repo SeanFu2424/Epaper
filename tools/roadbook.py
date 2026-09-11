@@ -266,6 +266,15 @@ def fmt_km(km):
     return "%.1f%s" % (float(km), KM_SUFFIX)
 
 
+def fmt_km_compact(km):
+    """公里数紧凑格式：整数无小数点（45 不写 45.0），小数保留一位。给爬坡第二行的
+    结束公里数用 —— 它要跟"星级 + 坡度%"挤在一行，省点像素是点。"""
+    v = float(km)
+    if v == int(v):
+        return "%d%s" % (int(v), KM_SUFFIX)
+    return "%.1f%s" % (v, KM_SUFFIX)
+
+
 # ---- 爬坡难度星级（规则抄 dincalculator 官网，不是拍脑袋）----
 #   1★ 温和   3-4%
 #   2★ 中等
@@ -317,10 +326,15 @@ def event_rows(ev):
         stars = max(1, min(STAR_MAX, stars))
         r1 = "CLM %.*f" % (1, float(ev.get("length", 0)))
         # 第二行左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），缩进表示从属于上面那行
-        # 右列不再是 "+237m 6.1%"，改成星级（爬升/坡度不上屏，太细了）
+        # 右列 = 难度星级 + 坡度百分比（如 ★★★★★ 9.1%）。
+        #   坡度来自 GPX 的 grade 字段，缺省时用 length/elev 反推不出就不显示。
+        grade = ev.get("grade")
+        grade_txt = "%.1f%%" % float(grade) if grade not in (None, "") else None
         end_km = float(ev["km"]) + float(ev.get("length", 0))
+        # 爬坡第二行左列用紧凑公里数格式（整数不写 .0），腾出空间给右列"星 + 坡度%"
+        end_km_str = fmt_km_compact(end_km)
         return [{"left": km, "right": r1, "arrow": None, "stars": 0, "sub": False},
-                {"left": fmt_km(end_km), "right": None, "arrow": None,
+                {"left": end_km_str, "right": grade_txt, "arrow": None,
                  "stars": stars, "sub": True}]
     raise ValueError(t)
 

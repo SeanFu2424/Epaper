@@ -54,12 +54,12 @@ def draw_arrow(c, px, x, y, size=rb.ARROW):
                 c.px(x + i, y + j, 0)
 
 
-def draw_stars(c, px, n, y, warn=None, page=0, left_w=0):
-    """右对齐画 n 颗星。y = 该行基线。返回实际占用的宽度（px）"""
+def draw_stars_at(c, px, n, y, x_right):
+    """在指定右边缘 x_right 处，右对齐画 n 颗星。y = 该行基线。"""
     if n <= 0:
-        return 0
+        return
     w = rb.star_width(n)
-    x0 = rb.SCREEN_W - rb.MARGIN - w
+    x0 = x_right - w
     ytop = y - rb.STAR + 1
     for k in range(n):
         xx = x0 + k * (rb.STAR + rb.STAR_GAP)
@@ -67,6 +67,14 @@ def draw_stars(c, px, n, y, warn=None, page=0, left_w=0):
             for i in range(rb.STAR):
                 if px[j * rb.STAR + i]:
                     c.px(xx + i, ytop + j, 0)
+
+
+def draw_stars(c, px, n, y, warn=None, page=0, left_w=0):
+    """右对齐画 n 颗星。y = 该行基线。返回实际占用的宽度（px）"""
+    if n <= 0:
+        return 0
+    w = rb.star_width(n)
+    draw_stars_at(c, px, n, y, rb.SCREEN_W - rb.MARGIN)
     return w
 
 
@@ -103,7 +111,22 @@ def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
                            y - rb.ARROW + 2)
                 right_w = rb.ARROW
             elif row.get("stars"):
-                right_w = draw_stars(c, star, row["stars"], y)
+                # 爬坡第二行：坡度百分比 + 难度星级（如 "9.1% ★★★★★"），一起右对齐。
+                # 星画在最右，坡度文字紧贴在星左侧（中间留 4px 间距）。
+                star_w = rb.star_width(row["stars"])
+                GAP_S = 4
+                # 星右边缘 = SCREEN_W - MARGIN，星左边缘 = 右边缘 - star_w
+                x_right = rb.SCREEN_W - rb.MARGIN
+                x_star_left = x_right - star_w
+                right_w = star_w
+                if row["right"]:
+                    x1, _y1, bw, _bh = f.bounds(row["right"], 0, 0)
+                    txt_w = bw + x1
+                    # 文字右边缘 = 星左边缘 - GAP_S
+                    c.cursor(x_star_left - GAP_S - txt_w, y)
+                    c.print(row["right"])
+                    right_w = star_w + GAP_S + txt_w
+                draw_stars_at(c, star, row["stars"], y, x_right)
             elif row["right"]:
                 x1, _y1, bw, _bh = f.bounds(row["right"], 0, 0)
                 right_w = bw + x1
