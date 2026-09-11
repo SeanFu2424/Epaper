@@ -63,17 +63,23 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
 **唯一"跟 JSON 有关"的代码**）· `02_Roadbook/sample.json`（示例路线，**是我编的占位，非用户真实路线**）·
 `第0/1/2步_*.md`（三份教程）· `_archive/`（旧 V1 工具链）
 
-## 七、Roadbook V1 规范
-`sample.json → roadbook_gen.py → roadbook.h → 02_Roadbook.ino → GxEPD2`
-- 5 事件：`turn/glu/climb/danger/finish`，**爬坡唯一占两行**
+## 七、Roadbook V1 规范（v1.5）
+`GPX →gpx_to_roadbook.py→ JSON →roadbook_gen.py→ roadbook.h →02_Roadbook.ino→ GxEPD2`
+- **6 事件**：`turn/glu/climb/danger/finish/**halfway**`，**爬坡唯一占两行**
+- 爬坡第二行 = **结束公里数**（缩进 8px）+ **难度星级**（`+237m 6.1%` 已去掉，太细且放不下）
+- 星级规则抄 dincalculator：1★3-4% / 3★≥5%&≥2km / 4★≥7%&≥3km / 5★≥9% 或 ≥7km
+- **GLU 不再区分胶/水**（H₂O 已按用户要求删除）
 - 页眉 y16 基线 / y22 横线；正文基线 **38..162**；每页最多 **6 行**（爬坡算 2）
 - 页脚：横线 **y=174**，状态栏基线 **y=190**，左时间 / 右电量
 - 字体 **FreeSansBold9pt7b**（yAdvance 22），行距自适应 24~38 + 垂直居中；边距 6px
-- 箭头 **16×16 自制位图**（字体只有 ASCII 0x20-0x7E）；爬坡第二行缩进 8px 显示结束公里数
-- 定点整数（km×10/length×10/elev/grade×10），零浮点；`PROGMEM` 是空宏
+- 位图两套（字体只有 ASCII 0x20-0x7E）：箭头 **16×16** / 星 **13×13**（内径比 0.45）
+- 🔴 **位图打包必须每行补齐到整字节**（`stride=(size+7)//8`）：`drawBitmap` 按
+  `ceil(w/8)` 字节取行。16px 箭头是 8 的倍数所以没事，13px 星星不补就整体错位
+- 定点整数（km×10/length×10/elev/grade×10 + stars），零浮点；`PROGMEM` 是空宏
 - **9pt Bold 是两列布局极限**：12pt 下 `108.9 km`+`DANGER`=196px>188px（已试过并回退）
 - 不显示当前公里数；右对齐必须 `getTextBounds()` 测宽（非等宽字体手打空格是假的）
 - 不上 ArduinoJson（V2 才上）：省编译时间 + Flash
+- `roadbook.h` 当前由 **fuzhishan.json**（用户真实 GPX）生成
 
 ## 八、踩过的坑
 1. `getTextBounds()` 量的是**当前字体**，在 `setFont()` 之前调用会拿到内置 5×7 宽度 → 低估近一半
@@ -82,6 +88,9 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
 3. 按键**不能轮询**（全刷 2s 里 loop 卡在 nextPage），必须 GPIO 中断 + **按下即排队**
 4. 局部刷新**残影不可接受**（用户实测），用全刷
 5. 预览器行距自检要追踪 `min_gap`（**允许负数**），只在 ov>0 时更新会算出假数字
+6. **位图打包要按行补齐到整字节**（`drawBitmap` 的要求）。原来按 8bit 连续打包，
+   16×16 箭头因为是 8 的倍数看不出问题；13×13 星星直接整体错位 ——
+   **PC 预览用的是未打包像素，所以这个错只有烧进板子才会暴露**（最贵的一种 bug）
 
 ## 九、已知不完美
 - 渲染规则**两份实现**（C 在 `02_Roadbook.ino`，Python 在 `tools/roadbook.py`）靠手抄对齐

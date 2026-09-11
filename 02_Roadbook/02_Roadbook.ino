@@ -1,7 +1,13 @@
 /*
- * Roadbook —— 5 种事件，左右两列，爬坡占两行
+ * Roadbook —— 6 种事件，左右两列，爬坡占两行
  *
- * 本版新增（2026-09-11）：
+ * 本版新增（2026-09-11 第二轮）：
+ *   1. 爬坡第二行的右列："+237m 6.1%" 改成【难度星级】位图（爬升/坡度不上屏）
+ *   2. 新增 HALFWAY 事件（路线中点提示）
+ *   3. 不再有补水（H2O）事件 —— 补给统一显示 GLU
+ *   星级和箭头一样是自制 1-bit 位图（字体只覆盖 ASCII，画不出 ★）
+ *
+ * 上一版（2026-09-11）：
  *   页脚状态栏 —— 底部一条长横线，线下左侧显示时间，右侧显示电池电量。
  *   数据来源（全部来自官方源码/wiki，不是猜的）：
  *     · 时间：板载 RTC 芯片 PCF85063，I2C 地址 0x51，SDA=GPIO47 / SCL=GPIO48
@@ -11,7 +17,7 @@
  *   对时方式：开机时若 RTC 时间无效，自动写入「编译时刻」；
  *             之后可在串口发一行  T2026-09-11 11:35:00  精确对时。
  *
- *  数据：roadbook.h（tools/roadbook_gen.py 从 sample.json 生成，不要手改）
+ *  数据：roadbook.h（tools/roadbook_gen.py 从 JSON 生成，不要手改）
  *  按键：PWR 按下=前进 N 页 / 长按 1.5s 关机；BOOT 按下=后退 N 页
  *  屏幕：微雪 ESP32-S3-ePaper-1.54 V2，200x200 GDEY0154D67
  */
@@ -131,13 +137,24 @@ static void computeLayout(int rows, int &top, int &gap) {
 }
 
 // ---- 渲染辅助 ----
-static inline int ag(int g) { return g < 0 ? -g : g; }   // abs
-
 static inline void ralignPrint(int16_t y, const char *s) {
   int16_t bx, by; uint16_t bw, bh;
   display.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
   display.setCursor(EPD_W - MARGIN - bw - bx, y);
   display.print(s);
+}
+
+// 星级：右对齐画 n 颗星（y = 该行基线；位图和箭头同一套机制）
+static void drawStars(int16_t y, uint8_t n) {
+  if (n == 0) return;
+  if (n > 5) n = 5;
+  int w = n * RB_STAR_SIZE + (n - 1) * RB_STAR_GAP;
+  int x0 = EPD_W - MARGIN - w;
+  for (uint8_t k = 0; k < n; k++) {
+    display.drawBitmap(x0 + k * (RB_STAR_SIZE + RB_STAR_GAP),
+                       y - RB_STAR_SIZE + 1,
+                       RB_STAR, RB_STAR_SIZE, RB_STAR_SIZE, GxEPD_BLACK);
+  }
 }
 
 // ---- 状态栏数据：时间（RTC PCF85063） + 电量（ADC） ----
@@ -289,30 +306,30 @@ static void renderPage(int idx) {
         display.drawBitmap(EPD_W - MARGIN - RB_ARROW_SIZE,
                            y - RB_ARROW_SIZE + 2,
                            RB_ARROWS[dir], RB_ARROW_SIZE, RB_ARROW_SIZE, GxEPD_BLACK);
-      } else if (type == 1) {                       // GLU
+      } else if (type == 1) {                       // GLU（补给统一显示 GLU，不再分胶/水）
         ralignPrint(y, "GLU");
       } else if (type == 3) {                       // DANGER
         ralignPrint(y, "DANGER");
       } else if (type == 4) {                       // FINISH
         ralignPrint(y, "FINISH");
+      } else if (type == 5) {                       // HALFWAY（路线中点）
+        ralignPrint(y, "HALFWAY");
       } else if (type == 2) {                       // CLIMB —— 两行
         uint16_t length10 = pgm_read_word(&RB_EVENTS[i].length);
-        uint16_t elev = pgm_read_word(&RB_EVENTS[i].elev);
-        int16_t  grade10 = (int16_t)pgm_read_word(&RB_EVENTS[i].grade);
 
         char rbuf[16];
         snprintf(rbuf, sizeof(rbuf), "CLM %d.%d", length10 / 10, length10 % 10);
         ralignPrint(y, rbuf);
 
-        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），右列 = 爬升 + 坡度
+        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），右列 = 难度星级
+        // （爬升/坡度不再上屏：200px 宽塞不下，且骑的时候看星级就够了）
         y += gap;
         uint16_t endKm10 = km10 + length10;          // 定点整数相加，零浮点
         snprintf(kmbuf, sizeof(kmbuf), "%.1f km", endKm10 / 10.0);
         display.setCursor(MARGIN + SUB_INDENT, y);   // 缩进 = 从属于上面那行
         display.print(kmbuf);
 
-        snprintf(rbuf, sizeof(rbuf), "+%dm %d.%d%%", elev, ag(grade10), ag(grade10) % 10);
-        ralignPrint(y, rbuf);
+        drawStars(y, pgm_read_byte(&RB_EVENTS[i].stars));
       }
       y += gap;
     }
@@ -461,7 +478,7 @@ void setup() {
   pwrQueue = bootQueue = 0;
   interrupts();
 
-  Serial.printf("boot - roadbook v1.4: \"%s\"  events=%u%s\n",
+  Serial.printf("boot - roadbook v1.5: \"%s\"  events=%u%s\n",
                 RB_NAME, (unsigned)RB_EVENT_COUNT,
                 FAST_PARTIAL ? "  (partial on)" : "");
   // 按键诊断：1 = 没按。按住 PWR 或 BOOT 再上电，这里应该能看到 0

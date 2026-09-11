@@ -8,10 +8,11 @@ Roadbook 预览器 —— 不烧录，在电脑上看 200x200 屏幕长什么样
     │ NANJING LOOP   1/3 │  页眉（路名 + 页码）      基线 y=16
     │ ────────────────── │  页眉横线                y=22
     │                    │
-    │ 22.6 km      CLM 3.1│  正文（自适应行距）      基线 y=38..166
-    │   25.7 km  +180m 5.4%│
-    │ 31.0 km      DANGER │
-    │ 40.5 km         GLU │
+    │ 22.6 km      CLM 3.1│  正文（自适应行距）      基线 y=38..162
+    │   25.7 km       ★★★│   爬坡第二行 = 结束公里数 + 星级
+    │ 31.0 km         GLU │
+    │ 45.2 km     HALFWAY │   中点
+    │ 40.5 km        ↱    │   转弯（位图箭头）
     │                    │
     │ ────────────────── │  页脚横线                y=174
     │ 14:32          87% │  状态栏（时间 / 电量）    基线 y=190
@@ -53,7 +54,23 @@ def draw_arrow(c, px, x, y, size=rb.ARROW):
                 c.px(x + i, y + j, 0)
 
 
-def render_page(c, idx, page_count, events, name, f, arrows, warn,
+def draw_stars(c, px, n, y, warn=None, page=0, left_w=0):
+    """右对齐画 n 颗星。y = 该行基线。返回实际占用的宽度（px）"""
+    if n <= 0:
+        return 0
+    w = rb.star_width(n)
+    x0 = rb.SCREEN_W - rb.MARGIN - w
+    ytop = y - rb.STAR + 1
+    for k in range(n):
+        xx = x0 + k * (rb.STAR + rb.STAR_GAP)
+        for j in range(rb.STAR):
+            for i in range(rb.STAR):
+                if px[j * rb.STAR + i]:
+                    c.px(xx + i, ytop + j, 0)
+    return w
+
+
+def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
                 gap, foot_left, foot_right):
     c.fill(1)
 
@@ -85,6 +102,8 @@ def render_page(c, idx, page_count, events, name, f, arrows, warn,
                 draw_arrow(c, px, rb.SCREEN_W - rb.MARGIN - rb.ARROW,
                            y - rb.ARROW + 2)
                 right_w = rb.ARROW
+            elif row.get("stars"):
+                right_w = draw_stars(c, star, row["stars"], y)
             elif row["right"]:
                 x1, _y1, bw, _bh = f.bounds(row["right"], 0, 0)
                 right_w = bw + x1
@@ -98,9 +117,11 @@ def render_page(c, idx, page_count, events, name, f, arrows, warn,
                 _x1, _y1, lw, _lh = f.bounds(row["left"], 0, 0)
                 gapx = (rb.SCREEN_W - rb.MARGIN - right_w) - (lx + lw)
                 if gapx < 4:
+                    rname = row["right"] or "箭头"
+                    if row.get("stars"):
+                        rname = "%d 颗星" % row["stars"]
                     warn.append("第 %d 页：'%s' 和 '%s' 只差 %dpx，快撞上了"
-                                % (idx + 1, row["left"],
-                                   row["right"] or "箭头", gapx))
+                                % (idx + 1, row["left"], rname, gapx))
 
             # 这一行墨迹的最低点（用实际字形的 yOffset+height）
             _x, oy, _w, oh = f.bounds(row["left"] or row["right"] or "A", 0, 0)
@@ -139,6 +160,21 @@ def render_arrows(arrows, scale=4):
     return img
 
 
+def render_stars_legend(star, scale_note=True):
+    """1~5 颗星的图例（原始尺寸，由调用方放大）"""
+    w = rb.star_width(rb.STAR_MAX) + 12
+    h = rb.STAR + 16
+    img = Image.new("L", (w, h), 255)
+    d = ImageDraw.Draw(img)
+    x = 6
+    for j in range(rb.STAR):
+        for i in range(rb.STAR):
+            if star[j * rb.STAR + i]:
+                d.point((x + i, 2 + j), fill=0)
+    d.text((6, rb.STAR + 3), "1 star", fill=0)
+    return img
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ap = argparse.ArgumentParser(description="Roadbook 预览器")
@@ -172,6 +208,8 @@ def main():
     f = pp.parse_gfx_font(font_path)
     glcd = pp.parse_glcd_font(glcd_path)
     arrows = rb.arrows_all()
+    star = rb.make_star()
+    arrows = rb.arrows_all()
 
     data = rb.load(args.json)
     name = data.get("name", "ROADBOOK")
@@ -194,7 +232,7 @@ def main():
     for i, evs in enumerate(pages):
         c.fill(1)
         top, gap_used, last_bottom = render_page(
-            c, i, len(pages), evs, name, f, arrows, warn,
+            c, i, len(pages), evs, name, f, arrows, star, warn,
             args.gap, args.time, args.batt)
         img = c.to_image()
         imgs.append(img)
@@ -206,11 +244,15 @@ def main():
 
     fa = render_arrows(arrows)
     pp.label_scale(fa, args.scale).save(os.path.join(out, "arrows.png"))
+    fs = render_stars_legend(star)
+    pp.label_scale(fs, args.scale).save(os.path.join(out, "stars.png"))
 
-    # 拼版（最后一格放箭头图例）
+    # 拼版（最后两格放箭头 / 星级图例）
     sc = args.scale
     cw, ch = rb.SCREEN_W * sc, rb.SCREEN_H * sc
-    cells = imgs + [fa]
+    cells = imgs + [fa, fs]
+    labels = ["%d/%d" % (i + 1, len(pages)) for i in range(len(imgs))]
+    labels += ["ARROWS (not to scale)", "STAR (not to scale)"]
     cols = min(4, len(cells))
     rows = (len(cells) + cols - 1) // cols
     pad, top_pad = 10, 16
@@ -220,7 +262,7 @@ def main():
     for i, img in enumerate(cells):
         r, cc = divmod(i, cols)
         x, y = pad + cc * (cw + pad), pad + r * (ch + top_pad + pad)
-        t = "ARROWS (not to scale)" if i == len(imgs) else "%d/%d" % (i + 1, len(pages))
+        t = labels[i]
         d.text((x + 2, y + 2), t, fill=0)
         sheet.paste(pp.label_scale(img, sc), (x, y + top_pad))
     sheet.save(os.path.join(out, "contact_sheet.png"))

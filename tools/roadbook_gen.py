@@ -32,6 +32,7 @@ TYPE_INDEX = {
     rb.TYPE_CLIMB: 2,
     rb.TYPE_DANGER: 3,
     rb.TYPE_FINISH: 4,
+    rb.TYPE_HALFWAY: 5,
 }
 
 
@@ -42,6 +43,7 @@ def gen_h(json_path, h_path):
 
     arrows = rb.arrows_all()
     arrow_bytes = [rb.pack_bitmap(arrows[d]) for d in DIR_LIST]
+    star_bytes = rb.pack_bitmap(rb.make_star(), rb.STAR)
 
     # 固定前缀 RB_*，固件只 include 一次就能用
     P = "RB"
@@ -66,15 +68,24 @@ def gen_h(json_path, h_path):
         out.append("    { %s },  // %s" % (", ".join("0x%02X" % x for x in b), d))
     out.append("};")
     out.append("")
+    out.append("// 爬坡星级位图（%dx%d 1-bit，画 n 颗就重复画 n 次，间距 RB_STAR_GAP）"
+               % (rb.STAR, rb.STAR))
+    out.append("#define %s_STAR_SIZE  %d" % (P, rb.STAR))
+    out.append("#define %s_STAR_GAP   %d" % (P, rb.STAR_GAP))
+    out.append("#define %s_STAR_BYTES %d" % (P, rb.STAR_BYTES))
+    out.append("static const uint8_t %s_STAR[%d] PROGMEM = { %s };"
+               % (P, rb.STAR_BYTES, ", ".join("0x%02X" % x for x in star_bytes)))
+    out.append("")
     out.append("// 事件（定点整数，无浮点）：")
     out.append("//   km    /10, 0.1km 精度   length /10   elev  m   grade /10  (0.1%%)")
     out.append("struct %s_Event {" % P)
-    out.append("    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish")
+    out.append("    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish 5=halfway")
     out.append("    uint8_t  dir;    // 0..7, only for turn")
     out.append("    uint16_t km;     // 0.1 km")
     out.append("    uint16_t length; // 0.1 km, only for climb")
     out.append("    uint16_t elev;   // m, only for climb")
     out.append("    int16_t  grade;  // 0.1 %%, only for climb (signed)")
+    out.append("    uint8_t  stars;  // 1..5, only for climb")
     out.append("};")
     out.append("")
     out.append("static const struct %s_Event %s_EVENTS[%d] PROGMEM = {" % (P, P, len(events)))
@@ -86,10 +97,12 @@ def gen_h(json_path, h_path):
             length10 = int(round(float(ev.get("length", 0)) * 10))
             elev = int(ev.get("elev", 0))
             grade10 = int(round(float(ev.get("grade", 0)) * 10))
+            stars = int(ev.get("stars") or 0) or rb.climb_stars(
+                ev.get("grade"), ev.get("length"))
         else:
-            length10 = elev = grade10 = 0
-        out.append("    { %d, %d, %d, %d, %d, %d },  // %2d: %s"
-                   % (t, d, km10, length10, elev, grade10, i + 1, _one_line(ev)))
+            length10 = elev = grade10 = stars = 0
+        out.append("    { %d, %d, %d, %d, %d, %d, %d },  // %2d: %s"
+                   % (t, d, km10, length10, elev, grade10, stars, i + 1, _one_line(ev)))
     out.append("};")
     out.append("")
     with open(h_path, "w", encoding="utf-8") as f:
@@ -99,7 +112,9 @@ def gen_h(json_path, h_path):
 
 def _one_line(ev):
     if ev["type"] == "climb":
-        return "climb %.1fkm +%dm %.1f%%" % (ev.get("length", 0), ev.get("elev", 0), ev.get("grade", 0))
+        st = int(ev.get("stars") or 0) or rb.climb_stars(ev.get("grade"), ev.get("length"))
+        return "climb %.1fkm +%dm %.1f%% %s" % (
+            ev.get("length", 0), ev.get("elev", 0), ev.get("grade", 0), "*" * st)
     return ev["type"]
 
 

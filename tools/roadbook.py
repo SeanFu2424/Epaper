@@ -3,12 +3,13 @@
 """
 Roadbook V1 —— 渲染核心（PC 预览器 和 ESP32 固件 共用同一套规则）
 
-V1 只有 5 种事件：
-    turn / glu / climb / danger / finish
+V1 只有 6 种事件：
+    turn / glu / climb / danger / finish / halfway
 
 排版铁律（改这里 = 预览和屏幕一起改）：
     公里数永远左对齐，事件永远右对齐。
-    爬坡是唯一允许占两行的事件。
+    爬坡是唯一允许占两行的事件；第二行 = 结束公里数（缩进）+ 难度星级。
+    没有文字也没有位图能画 ★（字体只覆盖 ASCII），所以星级是自制位图。
 
 为什么箭头要自制位图：
     FreeSans9pt7b 只覆盖 ASCII 0x20-0x7E，
@@ -18,6 +19,7 @@ V1 只有 5 种事件：
 """
 
 import json
+import math
 import os
 
 # ----------------------------------------------------------------------
@@ -57,7 +59,17 @@ FOOT_Y = 190           # 状态栏基线（9pt：数字无下伸部，墨迹底 
 KM_SUFFIX = " km"      # 公里数后缀（9pt 下 "108.9 km" 也放得下）
 
 ARROW = 16             # 箭头位图边长
-ARROW_BYTES = ARROW * ARROW // 8
+ARROW_BYTES = ARROW * ((ARROW + 7) // 8)
+
+# ---- 爬坡星级（代替原来的 "+237m 6.1%"）----
+# ★ 在 U+2605，字体里没有（只覆盖 ASCII 0x20-0x7E），
+#   所以和箭头一样用数学方法画成 1-bit 位图，PC 与 ESP32 共用同一份数据。
+STAR = 13              # 单颗星位图边长（12px 尖角糊成一团；13px 是 9pt 字高附近的甜点）
+STAR_GAP = 2           # 星与星的间距
+STAR_MAX = 5
+STAR_INNER = 0.45      # 内半径/外半径。标准五角星是 0.382（很尖），
+                       # 但 13px 下尖角会糊，0.45 更饱满、更认得出是星星
+STAR_BYTES = STAR * ((STAR + 7) // 8)
 
 
 def body_region():
@@ -116,8 +128,10 @@ TYPE_GLU = "glu"
 TYPE_CLIMB = "climb"
 TYPE_DANGER = "danger"
 TYPE_FINISH = "finish"
+TYPE_HALFWAY = "halfway"   # 中点提示
 
-EVENT_TYPES = (TYPE_TURN, TYPE_GLU, TYPE_CLIMB, TYPE_DANGER, TYPE_FINISH)
+EVENT_TYPES = (TYPE_TURN, TYPE_GLU, TYPE_CLIMB, TYPE_DANGER, TYPE_FINISH,
+               TYPE_HALFWAY)
 
 
 def norm_dir(d):
@@ -168,16 +182,79 @@ def arrows_all():
     return dict((name, make_arrow(*vec)) for name, vec in DIRS.items())
 
 
+# ----------------------------------------------------------------------
+# 星级位图：五角星，顶点朝上
+# ----------------------------------------------------------------------
+def _star_verts(size, inner=STAR_INNER):
+    """五角星 10 个顶点。inner = 内半径/外半径（0.382 是标准五角星比例）
+
+    五角星的重心不在外接圆圆心（上方有个尖角、下方是两个钝角），
+    所以最后按实际包围盒竖直居中 —— 否则星星看上去会偏上。
+    """
+    c = (size - 1) / 2.0
+    R = size / 2.0
+    r = R * inner
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5      # 从正上方开始，每 36°
+        rad = R if i % 2 == 0 else r
+        pts.append((c + rad * math.cos(ang), c + rad * math.sin(ang)))
+    ys = [p[1] for p in pts]
+    dy = c - (min(ys) + max(ys)) / 2.0
+    return [(x, y + dy) for x, y in pts]
+
+
+def _in_poly(x, y, poly):
+    """射线法判断点是否在多边形内"""
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            if x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+                inside = not inside
+    return inside
+
+
+def make_star(size=STAR, ss=6):
+    """画一颗五角星。返回 list[size*size]，1 = 黑点"""
+    poly = _star_verts(size)
+    need = (ss * ss + 1) // 2
+    px = []
+    for y in range(size):
+        for x in range(size):
+            hits = 0
+            for sy in range(ss):
+                for sx in range(ss):
+                    if _in_poly(x + (sx + 0.5) / ss, y + (sy + 0.5) / ss, poly):
+                        hits += 1
+            px.append(1 if hits >= need else 0)
+    return px
+
+
+def star_width(n, size=STAR, gap=STAR_GAP):
+    """n 颗星的总宽（px）"""
+    n = max(0, int(n))
+    return n * size + (n - 1) * gap if n else 0
+
+
 def pack_bitmap(px, size=ARROW):
-    """打包成字节：row-major，MSB 在左 —— 和 GxEPD2 的 drawBitmap 一致"""
+    """打包成字节：row-major，MSB 在左 —— 和 GxEPD2 的 drawBitmap 一致
+
+    ⚠️ 每行必须补齐到整字节：Adafruit_GFX / GxEPD2 的 drawBitmap 是按
+    ceil(width/8) 字节一行来取的。边长是 8 的倍数时（16px 的箭头）
+    补不补一样，所以箭头一直没暴露这个问题；12x12 的星星不补行就会整体错位
+    （PC 预览看不出来，因为预览用的是未打包的像素 —— 只有烧进板子才会发现）。
+    """
+    stride = (size + 7) // 8
     out = bytearray()
-    row = 0
-    for i, v in enumerate(px):
-        if v:
-            row |= 0x80 >> (i & 7)
-        if (i & 7) == 7:
-            out.append(row)
-            row = 0
+    for j in range(size):
+        row = bytearray(stride)
+        for i in range(size):
+            if px[j * size + i]:
+                row[i >> 3] |= 0x80 >> (i & 7)
+        out.extend(row)
     return bytes(out)
 
 
@@ -189,11 +266,33 @@ def fmt_km(km):
     return "%.1f%s" % (float(km), KM_SUFFIX)
 
 
+# ---- 爬坡难度星级（规则抄 dincalculator 官网，不是拍脑袋）----
+#   1★ 温和   3-4%
+#   2★ 中等
+#   3★ 扎实   5-7% 且 2km+
+#   4★ 难     7-9% 且 3km+
+#   5★ 残酷   9%+  或 7km+
+def climb_stars(grade, length_km):
+    g = float(grade or 0)
+    L = float(length_km or 0)
+    if g >= 9.0 or L >= 7.0:
+        return 5
+    if g >= 7.0 and L >= 3.0:
+        return 4
+    if g >= 5.0 and L >= 2.0:
+        return 3
+    if g >= 4.0:
+        return 2
+    return 1
+
+
 def event_rows(ev):
     """把一个事件拆成 1~2 行。每行返回 dict：
          left  : 左列文字（公里数，可能为空）
-         right : 右列文字（None 表示画箭头）
+         right : 右列文字（None 表示画箭头或星级）
          arrow : 方向名（仅 turn）
+         stars : 星级（仅爬坡第二行），0 = 不画
+         sub   : True = 缩进（从属于上一行）
     """
     t = ev.get("type", "").strip().lower()
     if t not in EVENT_TYPES:
@@ -202,21 +301,27 @@ def event_rows(ev):
     km = fmt_km(ev["km"])
 
     if t == TYPE_TURN:
-        return [{"left": km, "right": None, "arrow": norm_dir(ev.get("dir")), "sub": False}]
+        return [{"left": km, "right": None, "arrow": norm_dir(ev.get("dir")),
+                 "stars": 0, "sub": False}]
     if t == TYPE_GLU:
-        return [{"left": km, "right": "GLU", "arrow": None, "sub": False}]
+        return [{"left": km, "right": "GLU", "arrow": None, "stars": 0, "sub": False}]
     if t == TYPE_DANGER:
-        return [{"left": km, "right": "DANGER", "arrow": None, "sub": False}]
+        return [{"left": km, "right": "DANGER", "arrow": None, "stars": 0, "sub": False}]
     if t == TYPE_FINISH:
-        return [{"left": km, "right": "FINISH", "arrow": None, "sub": False}]
+        return [{"left": km, "right": "FINISH", "arrow": None, "stars": 0, "sub": False}]
+    if t == TYPE_HALFWAY:
+        return [{"left": km, "right": "HALFWAY", "arrow": None, "stars": 0, "sub": False}]
     if t == TYPE_CLIMB:
+        stars = int(ev.get("stars") or 0) or climb_stars(ev.get("grade"),
+                                                         ev.get("length"))
+        stars = max(1, min(STAR_MAX, stars))
         r1 = "CLM %.*f" % (1, float(ev.get("length", 0)))
-        r2 = "+%dm %.*f%%" % (int(float(ev.get("elev", 0))),
-                              1, float(ev.get("grade", 0)))
         # 第二行左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），缩进表示从属于上面那行
+        # 右列不再是 "+237m 6.1%"，改成星级（爬升/坡度不上屏，太细了）
         end_km = float(ev["km"]) + float(ev.get("length", 0))
-        return [{"left": km, "right": r1, "arrow": None, "sub": False},
-                {"left": fmt_km(end_km), "right": r2, "arrow": None, "sub": True}]
+        return [{"left": km, "right": r1, "arrow": None, "stars": 0, "sub": False},
+                {"left": fmt_km(end_km), "right": None, "arrow": None,
+                 "stars": stars, "sub": True}]
     raise ValueError(t)
 
 

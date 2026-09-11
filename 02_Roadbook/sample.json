@@ -1,6 +1,6 @@
 {
   "name": "NANJING LOOP",
-  "note": "V1 示例路书。type 只有 5 种：turn / glu / climb / danger / finish",
+  "note": "V1 示例路书。type 共 6 种：turn / glu / climb / danger / finish / halfway。爬坡的 stars 不写也行，渲染时按 grade+length 自动算",
   "events": [
     { "km": 8.4,   "type": "turn",  "dir": "left"  },
     { "km": 15.2,  "type": "glu"                    },
@@ -9,6 +9,7 @@
     { "km": 40.5,  "type": "glu"                    },
 
     { "km": 52.3,  "type": "turn",  "dir": "right" },
+    { "km": 60.2,  "type": "halfway"                },
     { "km": 61.7,  "type": "climb", "length": 5.8, "elev": 340, "grade": 6.2 },
     { "km": 74.2,  "type": "danger"                 },
     { "km": 85.0,  "type": "glu"                    },
