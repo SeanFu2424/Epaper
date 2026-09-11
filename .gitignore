@@ -1,5 +1,12 @@
-# ---- WorkBuddy 工具内部数据（会话记录 / 记忆 / 缓存）----
-.workbuddy/
+# ---- WorkBuddy 工具内部数据 ----
+# 注意：项目记忆 .workbuddy/memory/ 是**刻意要跟着仓库走**的
+#（换电脑续接项目全靠它），所以这里用 .workbuddy/* 而不是 .workbuddy/
+.workbuddy/*
+!.workbuddy/memory/
+
+# ---- 环境明文/临时文件（如果以后出现）----
+.workbuddy/*.log
+.workbuddy/*.tmp
 
 # ---- Arduino 构建产物 ----
 build/
