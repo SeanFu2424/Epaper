@@ -221,3 +221,60 @@ GPX 的 `<ele>` 有 GPS/气压计噪声，逐点累加会算出**几百米根本
 - 5~10 个点是否够一条 100km 路线 → 拿真实路线跑一次看密度是否可接受
 - 距离闸门 3km / 角度 90° 这两个阈值 → 预览器上看效果调
 - 补给公式里的「爬升/10」系数 → 用你自己的历史骑行数据回归校准
+
+---
+
+## 六、GPT 建议评估 + 燃料引擎（Fueling Engine）（2026-09-11 补充）
+
+用户贴了另一个 AI（GPT）的补给算法建议让我评估。核心论点：**GLU 不该建模成
+"地点 POI"，而应是"路线负荷驱动出的时间/距离补给事件"**。
+
+### 核实结果：GPT 引用的 3 个工具名（事实，已 WebSearch 核对）
+
+| GPT 说的 | 核实结果 |
+|---|---|
+| "OnCourse Fueling"（导入 GPX/TCX/FIT、胶放爬坡前） | ❌ **幻觉**，搜不到对应产品；同名 "OnCourse Systems" 是学校网页系统，无关 |
+| "Route Companion Fueling Calculator" | ❌ **幻觉**，搜不到 |
+| "Vo2Max Route Segment Calculator" | 🟡 **名字不准**，但功能有真实对应（见下） |
+
+> 结论：GPT 的核心逻辑是真的有产品在做，但**引用具体产品名时在编造**。
+> 印证之前的判断：涉及具体产品/数据，必须查证再采信。
+
+### 真实存在、且高度相关的产品（事实，已核实）
+
+1. **dincalculator.com/bike/route-card「Cycling Route Card Generator」** ⭐ **几乎就是本项目**
+   - 上传 GPX（Komoot/Strava/Garmin/Wahoo）→ 生成 **stem note（贴把立的纸条）**
+   - 物理模型算每段速度/功率（空气阻力 + 滚动阻力 + 爬坡做功）
+   - 爬坡检测：**≥4% 持续 300m+**，评 1~5 星（★☆☆☆☆ 到 ★★★★★）
+   - 补给点 gel/水，明确 **"提前到爬坡前吃，不是爬坡中"**
+   - 输出 **7cm 宽纸条** → 与我们的墨水屏把立路书**同构**（纸质版原型）
+2. **Garmin Smart Fueling Alerts**：FTP + 课程距离/海拔 + 天气 → 预计时间 + 强度 → 补给计划
+   （真实产品，验证了 GPT 的核心逻辑："时间 × 强度 → 补给"，而非固定距离）
+3. 其它同族：Cycling Data Lab（GPX/FIT 分段模拟）、Velosphere（intervals.icu 论坛）、
+   royceschultz/Cycling-Power-Calculator（GitHub，物理模型估功率）
+
+### GPT 建议里采纳的部分（方向正确，与我上一轮收敛一致）
+
+- GLU = **负荷驱动事件**，不是地点 POI —— 正确，且和"不查 POI"的既定结论一致
+- 四层结构：碳水目标(用户参数) → 路线时间 → 提前补给(爬坡前) → GLU 节点
+- **FUEL EVENT 内部 + GLU UI** 抽象 —— 符合"数据/渲染分离"原则
+- "补给总量 vs 补给位置是两套算法" —— 区分清晰
+- "先不写 GPX 解析，先单独设计 Fueling Engine" —— **同意**，与我上一轮判断一致
+
+### 🔴 GPT 一笔带过、但其实是最大坑的地方
+
+**"路线时间"这一层**：GPT 说用 FTP/体重/CdA 的物理模型估算每段时间。
+但本项目**目前没有 FTP 数据**（那是接了 intervals.icu 之后的事）。
+→ **V1 用「均速 / 等效距离」（已有公式：等效距离 = 距离 + 爬升/10），不上物理模型。**
+物理模型（dincalculator / Cycling Data Lab / Velosphere 的做法）需要 FTP，
+等接了 intervals.icu 再升级。
+
+### 结论：Fueling Engine 单独做，输入复用 sample.json
+
+Fueling Engine 的输入 = 「距离 / 海拔 / 坡度 / 预计时间」，输出 = `glu` 事件数组，
+**独立于 GPX 解析器**，可用现有 sample.json 直接测试。
+
+碳水目标参考区间（事实，多来源一致）：
+- 中等强度 60~90 g/h；高强度/竞速 80~120 g/h（需葡萄糖+果糖双通道）
+- 业余新手从 40~60 g/h 起步，逐步"训练肠道"到 90 g/h
+- 参考值应做成**用户可调参数**，不是算法写死
