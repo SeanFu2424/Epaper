@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>墨水屏骑行路书 · 学习与工作清单</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1e222b; --line:#2a2f3a;
+    --text:#e8eaed; --sub:#9aa3b2; --accent:#4ade80; --accent2:#60a5fa; --warn:#fbbf24;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    padding:0 14px 60px;}
+  header{position:sticky;top:0;background:var(--bg);padding:16px 0 10px;z-index:5;border-bottom:1px solid var(--line)}
+  h1{font-size:19px;margin:0 0 4px}
+  .sub{color:var(--sub);font-size:12.5px}
+  .bar{height:8px;background:var(--card2);border-radius:99px;overflow:hidden;margin:10px 0 6px}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
+  .pct{font-size:12px;color:var(--sub);display:flex;justify-content:space-between}
+  .tools{display:flex;gap:8px;margin-top:8px}
+  button{flex:1;background:var(--card2);color:var(--text);border:1px solid var(--line);
+    border-radius:10px;padding:8px;font-size:12.5px}
+  button:active{opacity:.6}
+  section{margin-top:22px}
+  h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;color:var(--sub);background:var(--card2);border:1px solid var(--line);
+    padding:1px 7px;border-radius:99px;font-weight:400}
+  .desc{color:var(--sub);font-size:12.5px;margin:0 0 8px}
+  ul{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  li{border-bottom:1px solid var(--line)}
+  li:last-child{border-bottom:0}
+  label{display:flex;gap:10px;padding:11px 12px;align-items:flex-start;cursor:pointer}
+  input{appearance:none;width:19px;height:19px;flex:0 0 19px;margin:2px 0 0;border:1.5px solid #4b5563;
+    border-radius:6px;background:transparent;position:relative}
+  input:checked{background:var(--accent);border-color:var(--accent)}
+  input:checked::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;
+    border:solid #0f1115;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .txt{font-size:14px}
+  .txt.done{color:var(--sub);text-decoration:line-through}
+  .note{display:block;font-size:12px;color:var(--sub);margin-top:2px}
+  .key{border-left:3px solid var(--warn);padding-left:9px;margin:8px 0 0;color:var(--sub);font-size:12.5px}
+  code{background:var(--card2);padding:1px 5px;border-radius:4px;font-size:12px;color:var(--accent2)}
+  .mvp{margin-top:26px;background:linear-gradient(180deg,#1a2332,#171a21);border:1px solid #2b3a52;border-radius:14px;padding:14px}
+  .mvp h3{margin:0 0 6px;font-size:14.5px;color:var(--accent2)}
+  .mvp p{margin:0 0 8px;font-size:13px;color:#c9d1de}
+  footer{margin-top:26px;color:var(--sub);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>墨水屏骑行路书 · 学习与工作清单</h1>
+  <div class="sub">零基础 → 上车可用｜预计业余 6–10 周｜勾选自动保存</div>
+  <div class="bar"><i id="fill"></i></div>
+  <div class="pct"><span id="cnt">0 / 0</span><span id="pct">0%</span></div>
+  <div class="tools">
+    <button onclick="toggleAll(true)">全部完成</button>
+    <button onclick="toggleAll(false)">全部重置</button>
+    <button onclick="exportTxt()">导出文本</button>
+  </div>
+</header>
+
+<div class="mvp">
+  <h3>核心架构决策（先记住这一条）</h3>
+  <p><b>服务端渲染，设备端只当相框。</b>手机/电脑把整屏画面渲染成 1-bit 位图字节流传给设备，设备只负责"收字节 → 刷屏"。这样中文字体、界面改版全在手机侧完成，固件代码不到 300 行。<br>
+  反例：在 ESP32 上塞中文字库、写布局代码——改一次界面就要重新烧录，新手会卡死在这里。</p>
+  <p><b>MVP 边界：</b>无 GPS、无实时速度。上传 GPX → 生成 N 张卡片位图 → 下发 → 按键翻页。其余全部留给第二版。</p>
+</div>
+
+<section>
+  <h2>阶段一 · 认板子 + 搭环境 <span class="tag">2–3 天</span></h2>
+  <p class="desc">拿到快递第一件事：确认主控、屏幕型号、接口，并向店家索要资料包。</p>
+  <ul data-sec="s1">
+    <li><label><input type="checkbox"><span class="txt">拍照记录主控丝印（ESP32-WROOM / S3 / C3 / RP2040…）<span class="note">九成可能是 ESP32 系列，资料最多</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">记录屏幕排线型号与尺寸分辨率（如 2.13" 250×122、SSD1680）<span class="note">三色屏刷新要 10–20 秒，骑行场景请选纯黑白</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">确认 USB 转串口芯片（CP210x / CH340 / 原生 USB）并装驱动</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">记录接口：电池座？SD 卡槽？按键？GPS？</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">把这三项信息发给助手，换取针对你板子的确切引脚与示例代码</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">向店铺客服索要资料包（原理图、示例程序、datasheet）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">安装 Arduino IDE 2.x 并添加 ESP32 板卡支持<span class="note">附加开发板网址：https://espressif.github.io/arduino-esp32/package_esp32_index.json</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">上传 Blink，串口监视器（115200）看到 Hello</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">连不上？换一根"带数据"的 USB 线再试</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">装板卡包超时？改用离线安装包或 PlatformIO 国内镜像<span class="note">这是 Day1 的真实卡点，别跟下载进度条死磕</span></span></label></li>
+  </ul>
+  <p class="key" style="border-left-color:#4ade80">
+    <b style="color:#4ade80">已确认硬件：ESP32-S3 + 1.54" 200×200 + 8MB Flash/PSRAM，注意四件事：</b><br>
+    ① <b>也没有经典蓝牙</b>——S3 同样只有 BLE（仅 ESP32 经典款有 SPP），网上传图例程用不了；但 V1 走 SD 卡，不需要无线；<br>
+    ② <b>原生 USB</b>——必须把 <code>USB CDC On Boot</code> 设为 <code>Enabled</code>，否则串口一个字都看不到；<br>
+    ③ <b>PSRAM 选 OPI PSRAM</b>——选错能编译但一跑就崩；deep sleep 唤醒脚是 GPIO0–21（比 C6 宽）；<br>
+    ④ <b>优先跑厂商 Demo</b>——引脚与驱动类以厂商资料为准，不要猜。
+  </p>
+  <p class="key" style="border-left-color:#60a5fa">
+    <b style="color:#60a5fa">V1 捷径：用 SD 卡槽跳过数据传输。</b>电脑渲染 BMP → 拷进 SD 卡 → 插回板子 → 读取翻页。不用写 USB/BLE/小程序，工作量从几周压到几天。
+  </p>
+  <p class="key">C/C++ 只需补：指针与数组、struct、位运算、uint8_t 定长类型、PROGMEM。当字典查，不用通读。</p>
+</section>
+
+<section>
+  <h2>阶段二 · 点亮屏幕 <span class="tag">3–5 天</span></h2>
+  <p class="desc">搞懂 SPI、分辨率/缓冲区、全刷 vs 局部刷、LUT 四个概念即可。</p>
+  <ul data-sec="s2">
+    <li><label><input type="checkbox"><span class="txt">用官方示例点亮，显示 Hello World</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">显示一张自定义 1-bit 位图<span class="note">这一步直接对应最终方案，重点验证</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">掌握转图工具：ImageMagick / image2cpp / Python Pillow</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">中文显示走"服务端渲染位图"路线，设备端不放字库</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">画出进度条、分隔线、图标等基础图形</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">记录：一次全刷耗时 ___ 秒，一次局部刷 ___ 秒</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">多买一块屏备用（墨水屏玻璃基底，很脆）</span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段三 · 把"显示什么"设计对 <span class="tag">1 周</span></h2>
+  <p class="desc">最难的不是技术，是"40km/h 手抖状态下 300ms 读完"。一屏只说一件事。</p>
+  <ul data-sec="s3">
+    <li><label><input type="checkbox"><span class="txt">定义路书卡片 JSON 格式（at_km / type / title / sub）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">设计三种板式：转弯卡、补给卡、爬坡卡<span class="note">关键数字 ≥48px，正文 ≥24px</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">写渲染脚本（Python + Pillow）输入 JSON 输出 1-bit 字节流</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">定义 bin 文件格式：magic + version + count + 每张卡片长度与负载</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">加 CRC 校验与 RLE/zlib 压缩（能压到 1/5）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">用 SD 卡或 USB 灌进设备，静态翻页看效果</span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段四 · 交互、存储与功耗 <span class="tag">3–5 天</span></h2>
+  <p class="desc">目标是脱离电脑、靠电池跑几周。M4 是整个项目的分水岭。</p>
+  <ul data-sec="s4">
+    <li><label><input type="checkbox"><span class="txt">两个按键翻页（GPIO 内部上拉 + 20ms 消抖 + 长按清屏）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">深度睡眠：只有 RTC GPIO 能唤醒，查清你芯片的可用引脚</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">用 RTC memory / LittleFS 记住"当前第几页"</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">卡面数据写入 LittleFS</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">目标待机电流 &lt; 100µA</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">低电量检测（ADC 分压）并在屏上提示；电池加保护板</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">残影管理：每 5–10 次局部刷后强制全刷</span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段五 · 无线下发 <span class="tag">1–2 周</span></h2>
+  <p class="desc">严格按 USB → WiFi → BLE 顺序推进，别一上来啃小程序蓝牙。</p>
+  <ul data-sec="s5">
+    <li><label><input type="checkbox"><span class="txt">A. 串口通道：Python + pyserial 把 bin 灌进设备</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">B. WiFi 通道：ESP32 开 AP + WebServer，手机打开 192.168.4.1 上传</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">上传后校验 CRC → 写 LittleFS → 刷新屏幕</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">C. 先学 BLE 概念：GATT / Service / Characteristic / MTU</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">用 nRF Connect（安卓）/ LightBlue（iOS）先调通，再写小程序</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">设计分包协议：序号 + 长度 + CRC + 重传<span class="note">默认 MTU 23 字节，4736 字节约需 24 包（协商后）</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">小程序页面：选 GPX → 预览卡片 → 连设备 → 下发<span class="note">主包 2MB 限制，资源走网络加载</span></span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段六 · GPX 分析自动生成路书 <span class="tag">1–2 周</span></h2>
+  <p class="desc">纯软件，与硬件解耦，可并行做，最容易出成就感。</p>
+  <ul data-sec="s6">
+    <li><label><input type="checkbox"><span class="txt">导出 GPX（行者/黑鸟/Strava/Garmin，或 bikerouter.de 规划后导出）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">用 gpxpy（Python）或 fast-xml-parser（JS）解析</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">距离计算：Haversine 逐点累加</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">爬坡识别：ele 先做移动平均 + ±3~5m 死区滤波，再分段<span class="note">不滤波会得到几十个假"爬坡"</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">转弯识别：取前后各 ~30m 平均方位角做差，阈值 &gt; 45°</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">补给点：优先用手工 wpt，否则按 30–40km 间距 + 爬坡前 2km 生成</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">输出 cue sheet JSON → 渲染 → 打印 A4 纸先真骑一次验证<span class="note">零成本验证信息是否有用，强烈建议做</span></span></label></li>
+    <li><label><input type="checkbox"><span class="txt">（可选）Leaflet 地图页做人工微调与打点</span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段七 · 机械结构与上车 <span class="tag">3–5 天</span></h2>
+  <ul data-sec="s7">
+    <li><label><input type="checkbox"><span class="txt">用 Garmin 四爪底座做标准接口 + 3D 打印转接背板</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">外壳：Onshape（免费/浏览器）自学一个周末，或找 3D 打印代工</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">总厚度控制在 12–16mm（去掉排针改直焊）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">防水防汗：透明 PC 窗口 + 双面胶密封 + 硅胶填缝</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">上路测试：颠簸 / 暴晒 / 阵雨各一次并记录问题</span></label></li>
+  </ul>
+</section>
+
+<section>
+  <h2>阶段八 · 进阶（可选）</h2>
+  <ul data-sec="s8">
+    <li><label><input type="checkbox"><span class="txt">加 GPS 模块 → 按里程/路口自动翻页</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">加 BLE 速度/踏频/心率传感器</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">加气压计（BMP390 / DPS310）提升海拔与坡度精度</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">画爬升剖面图（比数字直观太多）</span></label></li>
+    <li><label><input type="checkbox"><span class="txt">读一遍 OpenTrailPaper 开源项目源码</span></label></li>
+  </ul>
+</section>
+
+<footer>清单配套文档：墨水屏骑行路书_学习与工作清单.md<br>进度保存在本机浏览器，换设备不同步</footer>
+
+<script>
+const KEY='epaper_cue_checklist_v1';
+const boxes=[...document.querySelectorAll('input[type=checkbox]')];
+const saved=JSON.parse(localStorage.getItem(KEY)||'{}');
+boxes.forEach((b,i)=>{
+  b.checked=!!saved[i];
+  b.addEventListener('change',()=>{
+    saved[i]=b.checked;localStorage.setItem(KEY,JSON.stringify(saved));
+    b.nextElementSibling.classList.toggle('done',b.checked);refresh();
+  });
+  b.nextElementSibling.classList.toggle('done',b.checked);
+});
+function refresh(){
+  const n=boxes.filter(b=>b.checked).length,t=boxes.length;
+  document.getElementById('fill').style.width=(t?n/t*100:0)+'%';
+  document.getElementById('cnt').textContent=n+' / '+t;
+  document.getElementById('pct').textContent=(t?Math.round(n/t*100):0)+'%';
+}
+function toggleAll(v){
+  boxes.forEach((b,i)=>{b.checked=v;saved[i]=v;b.nextElementSibling.classList.toggle('done',v)});
+  localStorage.setItem(KEY,JSON.stringify(saved));refresh();
+}
+function exportTxt(){
+  let out='墨水屏骑行路书 · 清单进度\n\n';
+  document.querySelectorAll('section').forEach(s=>{
+    out+=s.querySelector('h2').textContent.trim()+'\n';
+    s.querySelectorAll('li').forEach(li=>{
+      const b=li.querySelector('input'),t=li.querySelector('.txt');
+      out+='  ['+(b.checked?'x':' ')+'] '+t.childNodes[0].textContent.trim()+'\n';
+    });
+    out+='\n';
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([out],{type:'text/plain;charset=utf-8'}));
+  a.download='清单进度.txt';a.click();
+}
+refresh();
+</script>
+</body>
+</html>

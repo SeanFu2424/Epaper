@@ -1,0 +1,26 @@
+# ---- WorkBuddy 工具内部数据（会话记录 / 记忆 / 缓存）----
+.workbuddy/
+
+# ---- Arduino 构建产物 ----
+build/
+*.elf
+*.map
+*.hex
+*.bin.bak
+.pio/
+
+# ---- 预览图是脚本生成的，可随时重跑 tools/ 下的预览器重建 ----
+# 目前选择保留在仓库里作为设计记录；若想清爽可取消下面两行注释
+# 01_Paging/preview*/
+# 02_Roadbook/preview/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store

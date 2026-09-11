@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pro Rider Stem Notes · 墨水屏 UI 原型</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#2a2f3a;--text:#e8eaed;--sub:#9aa3b2;--acc:#4ade80;--acc2:#60a5fa;--warn:#fbbf24}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;padding:16px 14px 50px}
+  h1{font-size:18px;margin:0 0 3px}
+  .sub{color:var(--sub);font-size:12.5px;margin-bottom:16px}
+  h2{font-size:14px;margin:22px 0 8px}
+
+  /* 墨水屏模拟：2.9" 296×128，放大 1.7 倍显示 */
+  .device{background:#2b2f38;border-radius:16px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:540px;margin:0 auto}
+  .screen{position:relative;background:#f2f2ef;border-radius:4px;overflow:hidden;aspect-ratio:296/128;
+    font-family:"PingFang SC","Microsoft YaHei",sans-serif;color:#111}
+  .content{position:absolute;inset:0;padding:2.2% 2.6%;display:flex;flex-direction:column}
+  .flash{position:absolute;inset:0;background:#111;opacity:0;pointer-events:none;z-index:9}
+  .flash.on{animation:epd 1.1s ease-out}
+  @keyframes epd{0%{opacity:0}12%{opacity:1}25%{opacity:0}37%{opacity:1}50%{opacity:0}62%{opacity:.55}100%{opacity:0}}
+
+  .top{display:flex;justify-content:space-between;align-items:baseline;font-size:clamp(9px,3.1cqw,15px);border-bottom:1.5px solid #111;padding-bottom:1%}
+  .top b{font-size:1.5em}
+  .mid{flex:1;display:flex;align-items:center;gap:3%;padding:1% 0}
+  .ico{width:16%;max-width:52px;flex:0 0 auto}
+  .ico svg{width:100%;height:auto;display:block}
+  .mid .txt{line-height:1.15}
+  .mid .t1{font-size:clamp(9px,3.4cqw,17px);font-weight:700;letter-spacing:.5px}
+  .mid .t2{font-size:clamp(16px,8.4cqw,44px);font-weight:800;line-height:1}
+  .mid .t3{font-size:clamp(8px,2.7cqw,13px);color:#444}
+  .bot{border-top:1.5px solid #111;padding-top:1.2%;display:flex;justify-content:space-between;align-items:center;font-size:clamp(8px,2.6cqw,12.5px)}
+  .nx{display:flex;gap:4%}
+  .nx div{display:flex;align-items:center;gap:3px}
+  .nx svg{width:clamp(9px,3cqw,15px);height:clamp(9px,3cqw,15px)}
+  .hint{font-size:clamp(7px,2.3cqw,11px);color:#666}
+
+  /* 列表页 / 详情页 */
+  .list{display:flex;flex-direction:column;height:100%;font-size:clamp(8px,2.9cqw,14px)}
+  .list .row{display:flex;align-items:center;gap:2.5%;padding:1.1% 0;border-bottom:1px dotted #bbb}
+  .list .row svg{width:clamp(9px,3.2cqw,16px);height:clamp(9px,3.2cqw,16px);flex:0 0 auto}
+  .list .row .nm{flex:1}
+  .list .row .km{font-weight:700;font-variant-numeric:tabular-nums}
+  .list h4{margin:0 0 1%;font-size:clamp(8px,2.7cqw,13px);border-bottom:1.5px solid #111;padding-bottom:.8%}
+  .det{height:100%;display:flex;flex-direction:column;justify-content:center;gap:.6%;font-size:clamp(8px,2.8cqw,13.5px)}
+  .det .dt{display:flex;justify-content:space-between;border-bottom:1px dotted #bbb;padding:.9% 0}
+  .det .dt b{font-variant-numeric:tabular-nums}
+
+  /* 时间轴 */
+  .tl{position:relative;height:54px;margin:18px 0 6px;max-width:540px;margin-left:auto;margin-right:auto}
+  .tl .rail{position:absolute;top:26px;left:0;right:0;height:2px;background:#3a4050}
+  .tl .ev{position:absolute;top:18px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:#3a4050;border:2px solid #0f1115;display:flex;align-items:center;justify-content:center}
+  .tl .ev.done{background:#2f5c3b}
+  .tl .ev.cur{background:var(--acc);width:22px;height:22px;top:15px;margin-left:-11px;box-shadow:0 0 0 4px rgba(74,222,128,.18)}
+  .tl .lb{position:absolute;top:40px;transform:translateX(-50%);font-size:10px;color:var(--sub);white-space:nowrap}
+  .tl .lb.cur{color:var(--acc);font-weight:700;top:42px}
+  .tl .me{position:absolute;top:2px;transform:translateX(-50%);font-size:10px;color:var(--acc2);white-space:nowrap;font-weight:600}
+
+  /* 控制 */
+  .ctrl{display:flex;gap:8px;max-width:540px;margin:14px auto 0;flex-wrap:wrap}
+  button{flex:1;min-width:88px;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px}
+  button:active{opacity:.55}
+  button.pri{background:#1d2a1f;border-color:#2f5c3b;color:var(--acc)}
+  .spd{display:flex;align-items:center;gap:8px;max-width:540px;margin:10px auto 0;font-size:12.5px;color:var(--sub)}
+  .spd select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12.5px}
+  .stat{max-width:540px;margin:10px auto 0;font-size:12.5px;color:var(--sub);display:flex;justify-content:space-between}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+  th,td{padding:7px 9px;border:1px solid var(--line);text-align:left}
+  th{background:#1e222b}
+  .note{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--sub);margin-top:12px;line-height:1.75}
+  .note b{color:var(--text)}
+  code{background:#22262f;padding:1px 5px;border-radius:4px;font-size:12px;color:var(--acc2)}
+</style>
+</head>
+<body>
+
+<h1>Pro Rider Stem Notes · UI 原型</h1>
+<div class="sub">2.9" 单色墨水屏 296×128 模拟 · 点击按钮可真实体验三层切换与 30 分钟推进</div>
+
+<div class="device">
+  <div class="screen" id="scr">
+    <div class="flash" id="flash"></div>
+    <div class="content" id="cv"></div>
+  </div>
+</div>
+
+<div class="tl" id="tl"><div class="rail"></div></div>
+
+<div class="ctrl">
+  <button onclick="go(-1)">◀ 上一层</button>
+  <button class="pri" onclick="go(1)">NEXT ▶</button>
+  <button class="pri" onclick="tick()">+30 分钟推进</button>
+  <button onclick="reset()">重置</button>
+</div>
+
+<div class="spd">
+  <span>刷新策略</span>
+  <select id="pol" onchange="reset()">
+    <option value="fix">固定 30 分钟</option>
+    <option value="ada" selected>自适应（1/3 误差预算，上限 30 分钟）</option>
+  </select>
+  <span>均速</span>
+  <select id="spd" onchange="reset()">
+    <option value="22">22</option>
+    <option value="25" selected>25</option>
+    <option value="28">28</option>
+    <option value="30">30</option>
+  </select>
+  <span>km/h</span>
+</div>
+
+<div class="stat">
+  <span>当前：<b id="skm" style="color:var(--text)">0.0 km</b></span>
+  <span>已刷新：<b id="sn" style="color:var(--text)">0 次</b>（<span id="shr">0.0 h</span>）</span>
+  <span>距上次：<b id="slp" style="color:var(--warn)">—</b></span>
+  <span>读数最大误差：<b id="serr" style="color:var(--warn)">—</b></span>
+  <span>层级：<b id="slv" style="color:var(--text)">L1 主页面</b></span>
+</div>
+<div class="stat" style="margin-top:4px">
+  <span id="nxt" style="color:var(--sub)">下次唤醒：—</span>
+</div>
+
+<h2>三层显示结构</h2>
+<table>
+  <tr><th>层级</th><th>回答什么问题</th><th>触发</th></tr>
+  <tr><td><b>L1 主页面</b></td><td>下一个关键点是什么，还有多远</td><td>默认常驻 / 每 30 分钟自动刷新</td></tr>
+  <tr><td><b>L2 未来列表</b></td><td>后面还有什么，整体节奏</td><td>短按 NEXT</td></tr>
+  <tr><td><b>L3 事件详情</b></td><td>这个爬坡多长多陡、要补什么</td><td>再按 NEXT（长按返回）</td></tr>
+</table>
+
+<div class="note">
+  <b>这个原型暴露了一个必须先解决的技术缺口：</b><br>
+  屏幕上「当前 42.6 km」这个数字<b>需要位置输入</b>，而 V1 方案是无 GPS 的。四种解法：<br>
+  ① <b>用时间近似距离</b>（本原型所用）——零硬件成本，误差来自实际均速与假设的偏差；<br>
+  ② <b>骑手看码表手动按 NEXT 校正</b>——准确，本原型同样支持（按 NEXT 跳到下一事件）；<br>
+  ③ <b>手机 BLE 推实时里程</b>——准确，但要做小程序 + BLE，工作量最大；<br>
+  ④ <b>加 GPS 模块</b>——最准，增加硬件、功耗与成本。<br>
+  建议 V1 用 ①+② 组合：<b>30 分钟自动推进兜底，骑手可随时按键校正</b>。
+</div>
+
+<div class="note" style="border-left-color:var(--acc)">
+  <b>「30 分钟」应该是上限，不是固定值——切换策略下拉框对比一下两种模式的状态栏。</b><br>
+  屏幕显示「距下一事件 D km」，刷新那一刻是准的，之后每骑 1 km 误差就 +1 km。固定 30 分钟 @ 25km/h → 最大误差 <b>±12.5 km</b>，比读数本身还大，骑手会以为爬坡还远，结果已经在眼前。<br><br>
+  <b>1/3 误差预算规则：</b><code>下次唤醒间隔 t = D ÷ (3 × 均速)</code>，下限 1 分钟、上限 30 分钟。<br>
+  → 离事件远时 30 分钟刷一次（符合直觉）；临近时自动加密到 1–3 分钟（保证准确）。<br>
+  → 全程约 70–90 次刷新 ≈ <b>1 mAh</b>，与固定 12 次的 0.15 mAh 都可忽略——既然功耗不是约束，就该按信息精度定间隔。
+</div>
+
+<div class="note" style="border-left-color:var(--acc2)">
+  <b>图标必须自己画成单色位图。</b>墨水屏是 1-bit 单色屏，emoji（⛰️🍼🟢）是彩色位图，缩放后会糊成一团黑点。正确做法是准备一套 24×24 或 32×32 的单色图标（爬坡=▲ 三角、补给=水滴/瓶、冲刺=闪电、终点=格子旗、危险=感叹号三角、转弯=箭头），在 PC 渲染时直接贴进画面。本原型用的就是自绘 SVG 单色图标。
+</div>
+
+<div class="note" style="border-left-color:var(--acc)">
+  <b>爬坡分级（给 GPX 分析用，参考 Strava 算法）：</b><br>
+  <code>score = 长度(km) × 平均坡度(%)</code><br>
+  CAT4 ≥ 15 ｜ CAT3 ≥ 30 ｜ CAT2 ≥ 50 ｜ CAT1 ≥ 80 ｜ HC ≥ 120<br>
+  注意：坡度必须先对海拔做滤波（移动平均 + ±3~5m 死区），否则 GPS 海拔噪声会让你识别出几十个假爬坡。
+</div>
+
+<script>
+const ICON={
+  start:'<svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="#111"/></svg>',
+  feed:'<svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2"><path d="M12 3s6 6.5 6 10a6 6 0 0 1-12 0c0-3.5 6-10 6-10z"/></svg>',
+  sprint:'<svg viewBox="0 0 24 24" fill="#111"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>',
+  climb:'<svg viewBox="0 0 24 24" fill="#111"><path d="M2 20h20L14 6l-3 5-3-2z"/></svg>',
+  danger:'<svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2"><path d="M12 3 2 21h20z"/><path d="M12 9v6M12 18h.01"/></svg>',
+  finish:'<svg viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2"><path d="M5 3v18"/><path d="M5 4h14l-3.5 3.5L19 11H5" fill="#111" stroke="none"/><path d="M8 15h8M8 18h8"/></svg>'
+};
+const EV=[
+  {km:0,   t:'start',  n:'START 起点',   d:'南京 · 环陵路'},
+  {km:12,  t:'feed',   n:'补给区',       d:'水 500ml / 能量胶 ×1'},
+  {km:35,  t:'sprint', n:'冲刺点',       d:'平路，最后 300m'},
+  {km:62,  t:'climb',  n:'CAT 3',        d:'3.2 km / +186 m / 5.8%'},
+  {km:78,  t:'feed',   n:'补给区',       d:'水 750ml / 电解质 ×1 / 香蕉'},
+  {km:105, t:'climb',  n:'CAT 1',        d:'7.2 km / +486 m / 6.7% / 建议 220–235 W'},
+  {km:132, t:'danger', n:'危险路段',     d:'连续发夹弯下坡 4 km，注意刹车'},
+  {km:150, t:'feed',   n:'最后补给',     d:'水 500ml / 胶 ×1'},
+  {km:165, t:'finish', n:'FINISH 终点',  d:'总爬升 1180 m'}
+];
+let km=0, lv=0, n=0, lastDt=0;
+const TOTAL=165;
+
+function speed(){return +document.getElementById('spd').value}
+function policy(){return document.getElementById('pol').value}
+function nx(){return EV.find(e=>e.km>km+0.01)||EV[EV.length-1]}
+function gap(){return Math.max(nx().km-km,0.02)}
+// 自适应：保证"读数误差 ≤ 剩余距离的 1/3"，下限 1 分钟、上限 30 分钟
+function planDt(){
+  if(policy()==='fix') return 0.5;
+  return Math.min(0.5, Math.max(1/60, gap()/(3*speed())));
+}
+function after(k){return EV.filter(e=>e.km>km+0.01).slice(0,k)}
+
+function render(fx){
+  const c=document.getElementById('cv');
+  const e=nx(), gap=(e.km-km).toFixed(1);
+  let h='';
+  if(lv===0){
+    const nx3=after(4).slice(1);
+    h=`<div class="top"><span>已骑 <b>${km.toFixed(1)}</b> km</span><span>剩 ${(TOTAL-km).toFixed(1)} km</span></div>
+      <div class="mid">
+        <div class="ico">${ICON[e.t]}</div>
+        <div class="txt"><div class="t1">${e.n}</div><div class="t2">${gap}<span style="font-size:.45em"> km</span></div><div class="t3">${e.d}</div></div>
+      </div>
+      <div class="bot"><div class="nx">${nx3.map(x=>`<div>${ICON[x.t].replace(/<svg[^>]*>/,'<svg viewBox="0 0 24 24" fill="#111">').replace(/stroke="[^"]*"/g,'')}<span>${(x.km-km).toFixed(1)}</span></div>`).join('')}</div><div class="hint">NEXT ▶</div></div>`;
+  }else if(lv===1){
+    h=`<div class="list"><h4>剩余关键点 · ${(TOTAL-km).toFixed(1)} km</h4>
+      ${after(7).map(x=>`<div class="row">${ICON[x.t]}<span class="nm">${x.n}</span><span class="km">${(x.km-km).toFixed(1)} km</span></div>`).join('')}</div>`;
+  }else{
+    const dt=e.d.split(' / ');
+    h=`<div class="det">
+      <div style="display:flex;align-items:center;gap:8px"><div style="width:26px">${ICON[e.t]}</div><div><div style="font-weight:800;font-size:1.25em">${e.n}</div><div style="font-size:.8em;color:#555">${e.km} km 处</div></div></div>
+      ${dt.map(s=>{const p=s.split(' ');return `<div class="dt"><span>${p[0]}</span><b>${p.slice(1).join(' ')||'—'}</b></div>`}).join('')}
+      <div class="dt"><span>距现在</span><b>${gap} km</b></div></div>`;
+  }
+  c.innerHTML=h;
+  if(fx){const f=document.getElementById('flash');f.classList.remove('on');void f.offsetWidth;f.classList.add('on')}
+  document.getElementById('skm').textContent=km.toFixed(1)+' km';
+  document.getElementById('sn').textContent=n+' 次';
+  document.getElementById('shr').textContent=(n*0.5).toFixed(1)+' h';
+  document.getElementById('slv').textContent=['L1 主页面','L2 未来列表','L3 事件详情'][lv];
+  document.getElementById('slp').textContent = lastDt? (lastDt*60).toFixed(0)+' 分钟':'—';
+  document.getElementById('serr').textContent= lastDt? '±'+(speed()*lastDt).toFixed(1)+' km':'—';
+  const dt=planDt();
+  document.getElementById('nxt').innerHTML='下次唤醒：<b style="color:var(--acc)">'+(dt*60).toFixed(1)+' 分钟后</b>'
+    +'（预计骑行 '+(speed()*dt).toFixed(1)+' km，届时剩余 '+Math.max(gap()-speed()*dt,0).toFixed(1)+' km）';
+  drawTl();
+}
+function drawTl(){
+  const t=document.getElementById('tl');
+  t.querySelectorAll('.ev,.lb,.me').forEach(x=>x.remove());
+  const cur=nx();
+  EV.forEach(e=>{
+    const p=(e.km/TOTAL*100);
+    const d=document.createElement('div');
+    d.className='ev'+(e.km<=km+0.01?' done':'')+(e===cur?' cur':'');
+    d.style.left=p+'%';t.appendChild(d);
+    if(e===cur){
+      const l=document.createElement('div');l.className='lb cur';l.style.left=p+'%';l.textContent=e.n;t.appendChild(l);
+    }
+  });
+  const m=document.createElement('div');m.className='me';m.style.left=(km/TOTAL*100)+'%';m.textContent='▲ '+km.toFixed(1)+'km';t.appendChild(m);
+}
+function go(d){lv=(lv+d+3)%3;render(true)}
+function tick(){
+  const dt=planDt(); lastDt=dt;
+  km=Math.min(km+speed()*dt,TOTAL); n++;
+  render(true);
+}
+function reset(){km=0;lv=0;n=0;lastDt=0;render(true)}
+render(false);
+</script>
+</body>
+</html>
