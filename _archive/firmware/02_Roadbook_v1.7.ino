@@ -1,23 +1,14 @@
 /*
- * Roadbook —— 7 种事件，左右两列，爬坡占两行
+ * Roadbook —— 6 种事件，左右两列，爬坡占两行
  *
- * 本版新增（2026-09-18，v1.7）：
- *   1. 新增 CP 事件（固定补给点）—— GPX 里作者人工标的真实补给点，
- *      屏幕显示 "CP1".."CPn"。它和 GLU 是两回事：
- *        CP  = 这里有补给（有人有店，必须停）
- *        GLU = 该吃胶了（按里程/时间推的提醒，不一定有店）
- *   2. dir 字段语义改成"箭头方向 0..7；RB_DIR_NONE(255) = 不画箭头"，
- *      于是任何事件都能带箭头 —— 同一个点"既要补给又要拐弯"会被
- *      合并成一行显示（如 "48.7 km  CP2 ↙"），不再出现同一公里数两行。
- *
- * 上一版（v1.6，2026-09-11 第二轮）：
+ * 本版新增（2026-09-11 第二轮）：
  *   1. 爬坡第二行的右列：改成【坡度百分比 + 难度星级】（如 "9.1% ★★★★★"），
  *      爬升高度不上屏，坡度百分比保留
  *   2. 新增 HALFWAY 事件（路线中点提示）
- *   3. 不再有补水（H2O）事件
+ *   3. 不再有补水（H2O）事件 —— 补给统一显示 GLU
  *   星级和箭头一样是自制 1-bit 位图（字体只覆盖 ASCII，画不出 ★）
  *
- * 更早（2026-09-11）：
+ * 上一版（2026-09-11）：
  *   页脚状态栏 —— 底部一条长横线，线下左侧显示时间，右侧显示电池电量。
  *   数据来源（全部来自官方源码/wiki，不是猜的）：
  *     · 时间：板载 RTC 芯片 PCF85063，I2C 地址 0x51，SDA=GPIO47 / SCL=GPIO48
@@ -91,8 +82,6 @@
 #define FULL_EVERY     4   // 局部刷新时每 4 页强制全刷一次清残影（FAST_PARTIAL=0 时无效）
 
 #define SUB_INDENT     8   // 爬坡第二行的缩进（视觉上从属于上面那行）
-#define GAP_TXT_ARROW  6   // 同一行里"文字 + 箭头"之间的留白（如 "CP2 ↙"）
-                           // 与 tools/preview_roadbook.py 的 GAP_A 必须一致
 
 // ---- 按键 ----
 #define DEBOUNCE_MS   30    // 电平稳定判定
@@ -326,7 +315,6 @@ static void renderPage(int idx) {
     int end = (idx + 1 < pageCount) ? pageStart[idx + 1] : (int)RB_EVENT_COUNT;
     for (int i = pageStart[idx]; i < end; i++) {
       uint8_t type = pgm_read_byte(&RB_EVENTS[i].type);
-      uint8_t dir  = pgm_read_byte(&RB_EVENTS[i].dir);
       uint16_t km10 = pgm_read_word(&RB_EVENTS[i].km);
 
       char kmbuf[10];
@@ -334,7 +322,20 @@ static void renderPage(int idx) {
       display.setCursor(MARGIN, y);
       display.print(kmbuf);
 
-      if (type == 2) {                              // CLIMB —— 两行
+      if (type == 0) {                              // TURN —— 画箭头
+        uint8_t dir = pgm_read_byte(&RB_EVENTS[i].dir);
+        display.drawBitmap(EPD_W - MARGIN - RB_ARROW_SIZE,
+                           y - RB_ARROW_SIZE + 2,
+                           RB_ARROWS[dir], RB_ARROW_SIZE, RB_ARROW_SIZE, GxEPD_BLACK);
+      } else if (type == 1) {                       // GLU（补给统一显示 GLU，不再分胶/水）
+        ralignPrint(y, "GLU");
+      } else if (type == 3) {                       // DANGER
+        ralignPrint(y, "DANGER");
+      } else if (type == 4) {                       // FINISH
+        ralignPrint(y, "FINISH");
+      } else if (type == 5) {                       // HALFWAY（路线中点）
+        ralignPrint(y, "HALFWAY");
+      } else if (type == 2) {                       // CLIMB —— 两行
         uint16_t length10 = pgm_read_word(&RB_EVENTS[i].length);
 
         char rbuf[16];
@@ -352,40 +353,6 @@ static void renderPage(int idx) {
 
         drawGradeStars(y, (int16_t)pgm_read_word(&RB_EVENTS[i].grade),
                        pgm_read_byte(&RB_EVENTS[i].stars));
-      } else {
-        // 其它事件：右列 = 文字（可能没有） + 箭头（可能没有），都右对齐。
-        //   箭头永远贴最右，文字写在箭头左边 —— 同一个点"既要补给又要拐弯"
-        //   会被合并成一行，所以这两者可以同时出现（如 "48.7 km  CP2 ↙"）。
-        char rbuf[12];
-        const char *txt = NULL;
-        if (type == 1)      txt = "GLU";             // 该吃胶了（按里程推的）
-        else if (type == 3) txt = "DANGER";
-        else if (type == 4) txt = "FINISH";
-        else if (type == 5) txt = "HALFWAY";
-        else if (type == 6) {                        // CP —— 固定补给点（GPX 航点）
-          snprintf(rbuf, sizeof(rbuf), "CP%d", pgm_read_byte(&RB_EVENTS[i].n));
-          txt = rbuf;
-        }
-
-        int arrowW = (dir == RB_DIR_NONE) ? 0 : RB_ARROW_SIZE;
-        int txtW = 0;
-        if (txt) {
-          int16_t bx, by; uint16_t bw, bh;
-          display.getTextBounds(txt, 0, 0, &bx, &by, &bw, &bh);
-          txtW = bw + bx;
-        }
-        int xr = EPD_W - MARGIN;
-        if (arrowW) {
-          if (txt) {
-            display.setCursor(xr - arrowW - GAP_TXT_ARROW - txtW, y);
-            display.print(txt);
-          }
-          display.drawBitmap(xr - arrowW, y - RB_ARROW_SIZE + 2,
-                             RB_ARROWS[dir], RB_ARROW_SIZE, RB_ARROW_SIZE, GxEPD_BLACK);
-        } else if (txt) {
-          display.setCursor(xr - txtW, y);
-          display.print(txt);
-        }
       }
       y += gap;
     }

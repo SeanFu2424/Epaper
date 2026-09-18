@@ -3,23 +3,28 @@
 """
 GPX -> 路书 JSON（阶段 A：离线纯几何，不联网）
 
-把一条 GPX 压缩成模板要的事件：turn / glu / climb / danger / halfway / finish。
+把一条 GPX 压缩成模板要的事件：turn / glu / climb / danger / halfway / finish / **cp**。
 
 链路：
     GPX -->【本脚本】--> 路书 JSON --> roadbook_gen.py --> roadbook.h --> 墨水屏
                                     --> preview_roadbook.py --> 电脑上看效果
 
 用法：
-    python tools/gpx_to_roadbook.py "在覆卮山燃烧.gpx" --name FUZHISHAN
-    python tools/gpx_to_roadbook.py x.gpx --max-events 10 --out 02_Roadbook/x.json
+    python tools/gpx_to_roadbook.py "在覆卮山燃烧.gpx" --name FUZHISHAN --pages 6
+    python tools/gpx_to_roadbook.py x.gpx --max-turns 5 --out 02_Roadbook/x.json
 
 参数起始值来源（不是拍脑袋）：
     爬坡 >=4% 且 >=300m      <- dincalculator 官网（真实产品在跑）
     爬坡星级 1~5★            <- dincalculator 官网难度分级
     转弯角度/聚类/最小间距    <- nbareil/gpx-to-markdown（开源项目默认值）
-    补给间隔 + 爬坡前移       <- dincalculator 官网"golden rule"
+    补给间隔 12~15km         <- dincalculator 官网 route card 的实际密度
 
-明确不做（V1）：
+🔴 补给分两种，语义完全不同，**不是二选一**（用户 2026-09-18 明确）：
+    CP1..CPn  「固定补给点」= GPX 自带航点，骑手人工标的，有人有店必须停
+    GLU       「该吃胶了」  = 规则估算的提醒，不一定有店
+    → 两者都出现在同一张路书上；GLU 与 CP 同点时 GLU 丢弃（真实补给点优先）
+
+明确不做：
     water  —— 补水提示已按用户要求去掉，只保留 GLU
     danger —— GPX 是纯几何轨迹，推不出"哪里有危险"，留给人工加
     路名   —— GPX 里没有路名，要路名得叠路网数据（BRouter，阶段 B）
@@ -305,38 +310,125 @@ def select_turns(turns, budget, min_spacing_km=3.0):
 
 
 # ======================================================================
-# 补给点（抄 dincalculator 的规则）
+# 补给点
 # ======================================================================
-def place_fuel(total_km, climbs, interval_km=25.0, before_km=3.0,
-               near_km=8.0, tail_km=5.0, heavy_grade=5.0, heavy_len_km=2.0):
-    """按间隔铺点，再把落在"重要爬坡"前 near_km 内的点前移到爬坡前 before_km。
+# 屏幕上补给分两种，语义完全不同，不能混：
+#
+#   CP1..CPn  「固定补给点」—— GPX 里作者人工标的航点，有人有店，必须停。
+#             km 是真实的，不参与估算，只做"别和爬坡撞"的微调。
+#   GLU       「该吃胶了」—— 没有航点可依据时，按里程/时间推出来的提醒。
+#             骑手看到 CP 是"这里有补给"，看到 GLU 是"该吃了"，两码事。
+#
+# 所以本文件的逻辑是：CP 全部来自 wpt；GLU 一律走规则估算（不再二选一）。
+def place_fuel(total_km, climbs, busy, cp_km, interval_km=13.0, spread_km=5.0,
+               step_km=0.4, min_gap_km=7.0, edge_gap_km=1.2,
+               cp_gap_km=3.0, tail_km=4.0):
+    """按里程间隔铺 GLU 提醒，落点要避开：
 
-    对应 dincalculator 官网："if a rated climb (3 star or higher) starts within
-    8 km of a planned gel stop, the stop is automatically shifted 3 km before it."
+    · **爬坡区间**（含前后 edge_gap_km 余量）—— 硬禁区。爬坡块占两行、
+      第二行写的是"结束公里数"，中间插一个更小的公里数会被读成倒挂。
+    · busy（转弯 / 中点 / 终点等已占用位置）前后 edge_gap_km
+    · cp_km 前后 cp_gap_km —— 已经到真实补给点了，不用再提醒吃胶
+
+    某个目标点放不下时，在 ±spread_km 内按 step_km 找最近的空位；
+    再找不到就放弃这个点（宁缺毋滥，别硬挤）。
     """
-    pts = []
+    climb_ranges = [(c["km"], c["km"] + c["length_km"]) for c in climbs]
+
+    def free(x):
+        for a, b in climb_ranges:
+            if a - edge_gap_km <= x <= b + edge_gap_km:
+                return False
+        for x0 in busy:
+            if abs(x - x0) < edge_gap_km:
+                return False
+        for x0 in cp_km:
+            if abs(x - x0) < cp_gap_km:
+                return False
+        return True
+
+    cands = []
     k = interval_km
     while k <= total_km - tail_km:
-        pts.append(round(k, 1))
+        n = int(round(spread_km / step_km))
+        hit = None
+        for i in range(n + 1):
+            for s in ((0,) if i == 0 else (-i, i)):
+                x = round(k + s * step_km, 1)
+                if x < 1.5 or x > total_km - tail_km:
+                    continue
+                if free(x):
+                    hit = x
+                    break
+            if hit is not None:
+                break
+        if hit is not None:
+            cands.append(hit)
         k += interval_km
 
-    heavy = [c for c in climbs
-             if c["grade"] >= heavy_grade and c["length_km"] >= heavy_len_km]
-    for c in heavy:
-        s = c["km"]
-        target = round(s - before_km, 1)
-        if target < 1.0:
+    out = []
+    for c in sorted(set(cands)):
+        if out and c - out[-1] < min_gap_km:
             continue
-        for i, p in enumerate(pts):
-            if s - near_km <= p <= s and abs(p - target) > 0.3:
-                pts[i] = target
+        out.append(c)
+    return out
 
-    merged = []
-    for p in sorted(pts):
-        if merged and p - merged[-1] < 5.0:
+
+def merge_same_km(events, climbs, notes):
+    """同一个公里数上的多个事件合并成一行（用户 2026-09-18 要求）。
+
+    合并规则：
+      1. 先处理"和爬坡结束公里数撞上"的：爬坡第二行印的就是结束公里数，
+         同点再来一行同样的数字，屏幕上像重复 -> 把非爬坡事件顺延 0.4 km。
+      2. 同一公里数剩下的按优先级取一个主事件，其余附着或丢弃：
+           转弯  -> 变成主事件的 arrow 字段（显示成 "CP2 ↙"）
+           GLU   -> 遇到同点的 CP 直接丢弃（有真实补给点就不用再提醒吃胶）
+      3. 爬坡永远独立占两行，不参与合并。
+    """
+    # ---- 1) 撞爬坡结束公里数 ----
+    ends = dict((round(c["km"] + c["length_km"], 1), round(c["km"], 1)) for c in climbs)
+    for e in events:
+        if e["type"] == "climb":
             continue
-        merged.append(p)
-    return merged
+        for _ in range(8):
+            k = round(e["km"], 1)
+            if k not in ends:
+                break
+            e["km"] = round(e["km"] + 0.4, 1)
+            notes.append("%.1f -> %.1f km（撞上爬坡[起 %.1f]的结束公里数，顺延）"
+                         % (k, e["km"], ends[k]))
+
+    # ---- 2) 同公里数分组 ----
+    groups = {}
+    order = []
+    for e in events:
+        k = round(e["km"], 1)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(e)
+
+    out = []
+    PRIO = {"cp": 4, "halfway": 3, "finish": 2, "glu": 1, "turn": 0, "climb": 9}
+    for k in order:
+        g = groups[k]
+        if len(g) == 1 or any(x["type"] == "climb" for x in g):
+            out.extend(sorted(g, key=lambda x: -PRIO.get(x["type"], 0)))
+            continue
+        head = max(g, key=lambda x: PRIO.get(x["type"], 0))
+        rest = [x for x in g if x is not head]
+        for x in rest:
+            if x["type"] == "turn" and "arrow" not in head:
+                head["arrow"] = x["dir"]
+                notes.append("%.1f km：转角 %s 并入同一行" % (k, x["dir"]))
+            elif x["type"] == "glu":
+                notes.append("%.1f km：GLU 与 %s 同点，去掉（真实补给点优先）"
+                             % (k, head["type"].upper()))
+            else:
+                out.append(x)      # 实在合并不了就留着（例如同点两个 CP）
+        out.append(head)
+    out.sort(key=lambda e: e["km"])
+    return out
 
 
 # ======================================================================
@@ -364,47 +456,45 @@ def build(gpx_path, args):
     # 终点前 2km 的转弯没意义（马上就到了，不用再提示转向）
     all_turns = [t for t in all_turns if t["km"] <= total_km - 2.0]
 
-    # ---- 补给点 ----
-    # 优先级：GPX 自带航点（人工标的真实补给点） > 按规则估算。
-    # 覆卮山那条 GPX 没有航点，只能用规则估；这条 Far 02 有 4 个真实补给点。
-    wpt_proj = project_waypoints(pts, dists, meta["waypoints"]) if meta["waypoints"] else []
-    wpt_fuel = [w["km"] for w in wpt_proj if w["km"] is not None]
-    if wpt_fuel and not args.no_wpt:
-        fuel, fuel_src = sorted(set(wpt_fuel)), "wpt"
-    else:
-        fuel = place_fuel(total_km, climbs, interval_km=args.fuel_interval,
-                          before_km=args.fuel_before, near_km=args.fuel_near)
-        fuel_src = "rule"
-
     # 落在爬坡区间里的事件要拿掉。爬坡占两行，第二行写的是"结束公里数"，
     # 里面再插转弯/补给会出现"17.6 后面跟 14.6"这种倒挂，读者会以为写错。
-    # 而且爬坡中本来就不该吃胶。
     climb_ranges = [(c["km"], c["km"] + c["length_km"]) for c in climbs]
 
     def _in_climb(k):
         return any(a <= k <= b for a, b in climb_ranges)
 
     all_turns = [t for t in all_turns if not _in_climb(t["km"])]
-    wpt_moved = []
-    if fuel_src == "rule":
-        # 规则估的补给点落在爬坡里就直接丢弃
-        fuel = [f for f in fuel if not _in_climb(f)]
-    else:
-        # 真实航点不能丢（那是骑手亲自标的店/补给位置），顺延到爬坡结束后一点
-        fixed = []
-        for f in fuel:
-            orig = f
-            for a, b in sorted(climb_ranges):
-                if a <= f <= b:
-                    f = round(b + 0.4, 1)
-                    wpt_moved.append((orig, f))
-                    break
-            fixed.append(f)
-        fuel = sorted(set(fixed))
 
-    # 事件预算：爬坡 / 补给 / 中点优先，剩下给转弯
-    budget = args.max_events - len(climbs) - len(fuel) - 2   # 2 = 中点 + 终点
-    turns = select_turns(all_turns, budget, min_spacing_km=args.turn_spacing)
+    # ---- 转弯：只保留 N 条大弯（用户 2026-09-18：150km 山路 8 条太吵）----
+    # select_turns 按角度从大到小挑，且彼此至少隔 turn_spacing km。
+    turns = select_turns(all_turns, args.max_turns, min_spacing_km=args.turn_spacing)
+
+    # ---- 固定补给点 CP：只来自 GPX 自带航点 ----
+    # 用户明确要求（2026-09-18）：这些是骑手人工标的"固定补给点"，
+    # **不能用 GLU 代替**，屏幕上要显示成 CP1 / CP2 / ...。
+    # GLU 是另一回事 —— 见下面 place_fuel()，那是"该吃胶了"的提醒。
+    wpt_proj = project_waypoints(pts, dists, meta["waypoints"]) if meta["waypoints"] else []
+    cp_list = []
+    if not args.no_wpt:
+        for w in sorted((x for x in wpt_proj if x["km"] is not None),
+                        key=lambda x: x["km"]):
+            cp_list.append({"km": round(w["km"], 1), "type": "cp",
+                            "label": "", "name": w["name"], "sym": w["sym"]})
+    # CP 不能丢（那是骑手亲自标的店/补给位置），落在爬坡区间里就顺延到爬坡结束后
+    wpt_moved = []
+    for c in cp_list:
+        for a, b in sorted(climb_ranges):
+            if a <= c["km"] <= b:
+                orig = c["km"]
+                c["km"] = round(b + 0.4, 1)
+                wpt_moved.append((orig, c["km"], c["name"]))
+                break
+    # 按最终里程重新编号（屏幕上必须单调递增）
+    cp_list.sort(key=lambda x: x["km"])
+    for i, c in enumerate(cp_list):
+        c["n"] = i + 1
+        c["label"] = "CP%d" % (i + 1)
+    cp_km = [c["km"] for c in cp_list]
 
     # ---- 中点提示（HALFWAY）----
     # 两个硬约束：
@@ -418,9 +508,8 @@ def build(gpx_path, args):
     # ⚠️ 别再用"从真中点一路 +0.4 往后找"的写法：它只检查了起点是否在爬坡里，
     #    中途会跨过爬坡起点钻进爬坡区间内部（这就是上面那个倒挂 bug 的成因）。
     half_true = total_km / 2.0
-    busy = [c["km"] for c in climbs] + list(fuel) + [t["km"] for t in turns]
-    busy += [c["km"] + c["length_km"] for c in climbs]
-    busy.append(total_km)
+    busy = ([c["km"] for c in climbs] + [c["km"] + c["length_km"] for c in climbs]
+            + cp_km + [t["km"] for t in turns] + [total_km])
 
     cands = []
     for i in range(-20, 21):
@@ -439,6 +528,23 @@ def build(gpx_path, args):
     else:
         half = None
 
+    # ---- GLU 提醒：按里程铺，避开爬坡 / CP / 转弯 / 中点 ----
+    # 页数预算：爬坡、CP、转弯、中点、终点先占掉，剩下的行数才给 GLU。
+    # 放不下就把间隔拉大（宁可少几个提醒，也不要把页数撑爆）。
+    fixed_rows = (2 * len(climbs) + len(cp_list) + len(turns)
+                  + (1 if half is not None else 0) + 1)      # +1 = 终点
+    busy2 = [t["km"] for t in turns] + ([half] if half is not None else []) + [total_km]
+
+    glu, interval = [], args.fuel_interval
+    for _ in range(10):
+        glu = place_fuel(total_km, climbs, busy2, cp_km,
+                         interval_km=interval, spread_km=args.fuel_spread,
+                         min_gap_km=args.fuel_min_gap,
+                         edge_gap_km=args.edge_gap, cp_gap_km=args.cp_gap)
+        if fixed_rows + len(glu) <= args.pages * rb.MAX_ROWS:
+            break
+        interval *= 1.2
+
     events = []
     for c in climbs:
         # ⚠️ 爬坡第二行显示的"结束公里数"是 km + length 反算出来的
@@ -455,7 +561,9 @@ def build(gpx_path, args):
                        "length": round(end_r - km_r, 1),
                        "elev": c["elev_m"], "grade": c["grade"],
                        "stars": rb.climb_stars(c["grade"], c["length_km"])})
-    for f in fuel:
+    for c in cp_list:
+        events.append(dict(c))
+    for f in glu:
         events.append({"km": f, "type": "glu"})
     for t in turns:
         events.append({"km": round(t["km"], 1), "type": "turn", "dir": t["dir"]})
@@ -463,6 +571,13 @@ def build(gpx_path, args):
         events.append({"km": half, "type": "halfway"})
     events.append({"km": round(total_km, 1), "type": "finish"})
     events.sort(key=lambda e: e["km"])
+
+    # ---- 同一公里数合并成一行（用户 2026-09-18 要求）----
+    notes = []
+    events = merge_same_km(events, climbs, notes)
+
+    # 合并后重新数一遍行数（合并可能少了几个 GLU）
+    n_rows = sum(2 if e["type"] == "climb" else 1 for e in events)
 
     data = {
         "name": args.name,
@@ -472,9 +587,12 @@ def build(gpx_path, args):
     stats = {
         "total_km": total_km, "raw_gain": raw_gain, "sm_gain": sm_gain,
         "n_climb": len(climbs), "n_turn_all": len(all_turns), "n_turn_kept": len(turns),
-        "n_fuel": len(fuel), "n_events": len(events), "half_km": half,
+        "n_cp": len(cp_list), "n_glu": len([e for e in events if e["type"] == "glu"]),
+        "n_events": len(events), "n_rows": n_rows, "half_km": half,
+        "fp_rows": fixed_rows, "glu_interval": interval,
         "meta": meta, "n_pts": len(pts),
-        "fuel_src": fuel_src, "wpt_proj": wpt_proj, "wpt_moved": wpt_moved,
+        "wpt_proj": wpt_proj, "wpt_moved": wpt_moved, "cp_list": cp_list,
+        "glu_km": [e["km"] for e in events if e["type"] == "glu"], "notes": notes,
     }
     return data, events, climbs, stats
 
@@ -492,21 +610,33 @@ def main():
     ap.add_argument("--min-grade", type=float, default=4.0, help="爬坡最小坡度%%")
     ap.add_argument("--min-len", type=float, default=300.0, help="爬坡最小长度(米)")
     ap.add_argument("--climb-window", type=float, default=250.0, help="坡度计算窗口(米)")
-    ap.add_argument("--climb-merge", type=float, default=1000.0,
-                    help="相邻爬坡段间隔小于此值就合并(米)。默认 1000")
-    ap.add_argument("--min-gain", type=float, default=60.0, help="爬坡最小爬升(米)")
+    ap.add_argument("--climb-merge", type=float, default=800.0,
+                    help="相邻爬坡段间隔小于此值就合并(米)。默认 800（越小坡切得越细）")
+    ap.add_argument("--min-gain", type=float, default=30.0,
+                    help="爬坡最小爬升(米)。默认 30（越小保留的小坡越多）")
     # 转弯
     ap.add_argument("--turn-angle", type=float, default=60.0, help="转弯角度阈值")
     ap.add_argument("--turn-cluster", type=float, default=200.0, help="转弯聚类半径(米)")
-    ap.add_argument("--turn-spacing", type=float, default=3.0, help="保留的转弯最小间隔(km)")
+    ap.add_argument("--max-turns", type=int, default=5,
+                    help="最多保留几个转弯提示（按角度从大到小挑）。默认 5")
+    ap.add_argument("--turn-spacing", type=float, default=8.0,
+                    help="保留的转弯之间最小间隔(km)。默认 8")
     # 补给
-    ap.add_argument("--fuel-interval", type=float, default=25.0, help="补给间隔(km)")
-    ap.add_argument("--fuel-before", type=float, default=3.0, help="爬坡前多少 km 放补给")
-    ap.add_argument("--fuel-near", type=float, default=8.0, help="爬坡前多少 km 内的补给会被前移")
+    ap.add_argument("--fuel-interval", type=float, default=13.0,
+                    help="GLU 提醒的里程间隔(km)。默认 13（对标 dincalculator 的 12~15）")
+    ap.add_argument("--fuel-spread", type=float, default=5.0,
+                    help="目标点放不下时前后找空位的范围(km)")
+    ap.add_argument("--fuel-min-gap", type=float, default=7.0,
+                    help="两个 GLU 之间至少隔多远(km)")
+    ap.add_argument("--edge-gap", type=float, default=1.2,
+                    help="事件与爬坡区间/其它事件的最小间距(km)")
+    ap.add_argument("--cp-gap", type=float, default=3.0,
+                    help="GLU 离 CP 至少多远(km)。到了真实补给点就不用再提醒吃胶")
     ap.add_argument("--no-wpt", action="store_true",
-                    help="忽略 GPX 自带航点，强制用规则估算补给点")
-    # 总量
-    ap.add_argument("--max-events", type=int, default=14, help="事件总数上限（含中点/终点）")
+                    help="忽略 GPX 自带航点（于是没有 CP，只有 GLU）")
+    # 页数
+    ap.add_argument("--pages", type=int, default=6,
+                    help="目标页数上限（超了就把 GLU 间隔拉大）。默认 6")
     args = ap.parse_args()
 
     if not os.path.exists(args.gpx):
@@ -543,29 +673,42 @@ def main():
         print("         %6.1f -> %6.1f km  %4.1f km  +%3dm  %.1f%%   %s"
               % (_km, _end, round(_end - _km, 1), c["elev_m"], c["grade"],
                  "*" * rb.climb_stars(c["grade"], c["length_km"])))
-    print("转弯   : 候选 %d -> 保留 %d  补给 %d  中点 %s"
-          % (st["n_turn_all"], st["n_turn_kept"], st["n_fuel"],
-             ("%.1f km" % st["half_km"]) if st["half_km"] else "无"))
+    print("转弯   : 候选 %d -> 保留 %d 条大弯（最多 %d 条、间隔 >=%.0fkm）"
+          % (st["n_turn_all"], st["n_turn_kept"], args.max_turns, args.turn_spacing))
 
-    # 补给点来源：GPX 自带航点 还是 规则估算
-    if st["fuel_src"] == "wpt":
-        print("补给   : 来自 GPX 自带航点（真实标记，非算法估算）")
+    # CP = GPX 自带航点（固定补给点，人工标注）
+    if st["cp_list"]:
+        print("CP     : %d 个固定补给点（来自 GPX 自带航点，非算法估算）" % st["n_cp"])
+        by_name = dict((w["name"], w) for w in st["wpt_proj"] if w["km"] is not None)
+        for c in st["cp_list"]:
+            w = by_name.get(c["name"], {})
+            print("         %-4s %6.1f km   %-12s (%s)"
+                  % (c["label"], c["km"], c["name"], w.get("sym", "")))
         for w in st["wpt_proj"]:
             if w["km"] is None:
                 print("         !! '%s' 离轨迹 %.0f m，判定不在路线上，已忽略"
                       % (w["name"], w["off_m"]))
-            else:
-                print("         %6.1f km   %-12s (%s)" % (w["km"], w["name"], w["sym"]))
-        for a, b in st["wpt_moved"]:
-            print("         ~  %.1f -> %.1f km（原本落在爬坡内，顺延到爬坡后）" % (a, b))
+        for a, b, nm in st["wpt_moved"]:
+            print("         ~  %.1f -> %.1f km（%s 原本落在爬坡内，顺延到爬坡后）" % (a, b, nm))
     else:
-        if st["meta"]["n_wpt"]:
-            print("补给   : 按规则估算（--no-wpt 已关闭航点；GPX 里有 %d 个航点被忽略）"
-                  % st["meta"]["n_wpt"])
-        else:
-            print("补给   : 按规则估算（GPX 里没有航点）")
+        print("CP     : 无（GPX 里%s航点%s）"
+              % ("有 %d 个但被 --no-wpt 忽略" % st["meta"]["n_wpt"]
+                 if st["meta"]["n_wpt"] else "没有", ""))
 
-    print("事件   : 共 %d 个" % st["n_events"])
+    print("GLU    : %d 个吃胶提醒（间隔 %0.1f km 起铺，避让爬坡/CP/转弯）"
+          % (st["n_glu"], args.fuel_interval))
+    if st["glu_km"]:
+        print("         " + "  ".join("%.1f" % k for k in st["glu_km"]))
+    print("中点   : %s" % (("%.1f km" % st["half_km"]) if st["half_km"] else "无"))
+
+    if st["notes"]:
+        print("合并   : 同一公里数合并成一行")
+        for n in st["notes"]:
+            print("         - %s" % n)
+
+    print("事件   : 共 %d 个 / %d 行 -> 约 %d 页（每页最多 %d 行）"
+          % (st["n_events"], st["n_rows"],
+             (st["n_rows"] + rb.MAX_ROWS - 1) // rb.MAX_ROWS, rb.MAX_ROWS))
     print("路名   : %s" % args.name)
     print("已写出 : %s" % out)
     print()

@@ -1,0 +1,102 @@
+{
+  "name": "FAR02",
+  "note": "由 tools/gpx_to_roadbook.py 生成自 Far+02+GroupA.gpx",
+  "events": [
+    {
+      "km": 7.0,
+      "type": "turn",
+      "dir": "left"
+    },
+    {
+      "km": 28.4,
+      "type": "glu"
+    },
+    {
+      "km": 30.2,
+      "type": "climb",
+      "length": 18.4,
+      "elev": 962,
+      "grade": 5.2,
+      "stars": 5
+    },
+    {
+      "km": 48.7,
+      "type": "glu"
+    },
+    {
+      "km": 48.7,
+      "type": "turn",
+      "dir": "down_left"
+    },
+    {
+      "km": 52.4,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 57.4,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 74.9,
+      "type": "halfway"
+    },
+    {
+      "km": 76.2,
+      "type": "climb",
+      "length": 3.2,
+      "elev": 129,
+      "grade": 4.0,
+      "stars": 2
+    },
+    {
+      "km": 80.4,
+      "type": "climb",
+      "length": 1.7,
+      "elev": 135,
+      "grade": 7.9,
+      "stars": 2
+    },
+    {
+      "km": 82.1,
+      "type": "glu"
+    },
+    {
+      "km": 84.0,
+      "type": "turn",
+      "dir": "down_left"
+    },
+    {
+      "km": 116.4,
+      "type": "turn",
+      "dir": "right"
+    },
+    {
+      "km": 124.7,
+      "type": "climb",
+      "length": 11.6,
+      "elev": 637,
+      "grade": 5.5,
+      "stars": 5
+    },
+    {
+      "km": 137.0,
+      "type": "glu"
+    },
+    {
+      "km": 143.9,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 147.6,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 150.6,
+      "type": "finish"
+    }
+  ]
+}

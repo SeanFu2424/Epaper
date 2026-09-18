@@ -63,20 +63,25 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
 `00_HelloScreen/`（第 0 步里程碑，已验证，**不要改坏**）· `01_Paging/`（第 1 步分页）·
 `02_Roadbook/`（第 2 步路书，**当前活跃**）· `tools/roadbook.py`（渲染核心，PC 与固件共用规则）·
 `tools/preview_roadbook.py` / `preview_paging.py`（预览器）· `tools/roadbook_gen.py`（JSON→C 头文件，
-**唯一"跟 JSON 有关"的代码**）· `02_Roadbook/sample.json`（示例路线，**是我编的占位，非用户真实路线**）·
-`第0/1/2步_*.md`（三份教程）· `_archive/`（旧 V1 工具链）
+**唯一"跟 JSON 有关"的代码**）· `tools/gpx_to_roadbook.py`（GPX→路书 JSON，阶段 A 核心）·
+`02_Roadbook/sample.json`（示例路线，**是我编的占位，非用户真实路线**）·
+`02_Roadbook/far02.json`（用户真实路线 Far02，150km）· `第0/1/2步_*.md`（三份教程）·
+`_设计/`（调研文档 + 对比 HTML + `roadbook_variants/` 备选版式）· `_archive/`（旧 V1 工具链 + 固件归档）·
+读 PDF 用 `.workbuddy/pylibs/`（pypdf + pymupdf，`PYTHONPATH=.workbuddy/pylibs`）
 
-## 七、Roadbook V1 规范（v1.6）
+## 七、Roadbook V1 规范（v1.7）
 `GPX →gpx_to_roadbook.py→ JSON →roadbook_gen.py→ roadbook.h →02_Roadbook.ino→ GxEPD2`
-- **6 事件**：`turn/glu/climb/danger/finish/**halfway**`，**爬坡唯一占两行**
+- **7 事件**：`turn/glu/climb/danger/finish/halfway/**cp**`，**爬坡唯一占两行**
+- 🔴 **CP 与 GLU 是两件事，不是二选一**（2026-09-18 用户纠正）：
+  - **CP1..CPn** = **固定补给点**，只来自 GPX 航点（骑手人工标的，有人有店必须停）
+  - **GLU** = **"该吃胶了"的提醒**，规则估算（不一定有店）
+  - 两者**同时出现在路书上**；GLU 与 CP 同点则 GLU 丢弃
+- 🔴 **同一公里数合并成一行**（用户要求）：同点的转弯折成主事件的 `arrow` 字段，
+  屏幕显示 `48.7 km  CP2 ↙`；撞上"爬坡结束公里数"的非爬坡事件顺延 0.4km。
+  → 任何事件都可带 `arrow`；固件里 `dir` 语义 = **0..7 画箭头 / 255(`RB_DIR_NONE`) 不画**
 - 爬坡第二行 = **结束公里数**（缩进 8px，**不带 " km" 单位**）+ **坡度%** + **难度星级**
-  （`+237m` 爬升高度已去掉；" km" 也去掉 —— 三位数公里数时 `136.2 km`+`5.5%`+5星=181px
-  超过可用 180px 会粘连，省略单位省 20px 且不损失精度）
 - 星级规则抄 dincalculator：1★3-4% / 3★≥5%&≥2km / 4★≥7%&≥3km / 5★≥9% 或 ≥7km
 - **GLU 不再区分胶/水**（H₂O 已按用户要求删除）
-- 🔴 **补给点来源优先级：GPX 自带航点(wpt) > 规则估算**。
-  有 `--` wpt 就用真实的（骑手人工标的），`--no-wpt` 才强制走规则。
-  **有或没有取决于路线作者标没标，每条 GPX 都要检查，不能假设**
 - 页眉 y16 基线 / y22 横线；正文基线 **38..162**；每页最多 **6 行**（爬坡算 2）
 - 页脚：横线 **y=174**，状态栏基线 **y=190**，左时间 / 右电量
 - 字体 **FreeSansBold9pt7b**（yAdvance 22），行距自适应 24~38 + 垂直居中；边距 6px
@@ -84,16 +89,35 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
   13px 是**星的可辨认下限**（12px 尖角糊），所以挤的时候不能靠缩星解决
 - 🔴 **位图打包必须每行补齐到整字节**（`stride=(size+7)//8`）：`drawBitmap` 按
   `ceil(w/8)` 字节取行。16px 箭头是 8 的倍数所以没事，13px 星星不补就整体错位
+- **右列排版规则（预览器与固件同一套）**：星贴最右、坡度%写星左边（间距 4）；
+  箭头贴最右、文字写箭头左边（间距 6）；再往左才是左列的公里数
 - 定点整数（km×10/length×10/elev/grade×10 + stars），零浮点；`PROGMEM` 是空宏
 - **9pt Bold 是两列布局极限**：12pt 下 `108.9 km`+`DANGER`=196px>188px（已试过并回退）
 - 不显示当前公里数；右对齐必须 `getTextBounds()` 测宽（非等宽字体手打空格是假的）
 - 不上 ArduinoJson（V2 才上）：省编译时间 + Flash
-- `roadbook.h` 当前由 **fuzhishan.json 或 far02.json**（均为用户真实 GPX）生成
-- **爬坡检测默认值**（`gpx_to_roadbook.py`）：`min_grade=4%`、`min_len=300m`、
-  向前窗口 `250m`、`merge_gap=1000m`（间隔<1km 合并）、`min_gain=60m`（不够就丢）
-  → Far02 150km 出 **4 段**；网站同一份 GPX 出 **15 段**（不合并）
-- **补给默认**：`--fuel-interval 25km`、`--fuel-before 3km`、`--fuel-near 8km`；
-  但**只要有 wpt 航点就优先用真实的**，规则只在没有航点时生效（`--no-wpt` 可强制走规则）
+- `roadbook.h` 最新由 **far02.json** 生成（FAR02，25 事件，含 CP/合并行）
+
+### 参数速查（`gpx_to_roadbook.py`）
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--climb-merge` | 800 m | 相邻爬坡间隔小于此值就合并。1000→4段 / 800→7段 / 500→10段（Far02） |
+| `--min-gain` | 30 m | 爬坡最小爬升，不够就丢 |
+| `--climb-window` | 250 m | 坡度计算的前向窗口 |
+| `--max-turns` | 5 | 最多保留几个转弯（按转角从大到小挑） |
+| `--turn-spacing` | 8 km | 保留的转弯之间最小间隔 |
+| `--fuel-interval` | 13 km | GLU 基础间隔（对标 dincalculator 的 12~15） |
+| `--fuel-spread` | 5 km | 目标点放不下时前后找空位的范围 |
+| `--fuel-min-gap` | 7 km | 两个 GLU 之间至少隔多远 |
+| `--edge-gap` | 1.2 km | 事件与爬坡区间/其它事件的最小间距 |
+| `--cp-gap` | 3 km | GLU 离 CP 至少多远 |
+| `--pages` | 6 | 目标页数，超了自动把 GLU 间隔 ×1.2 重来 |
+
+生成命令（Far02 6 页版）：
+```bash
+python tools/gpx_to_roadbook.py "Far+02+GroupA.gpx" --name FAR02 --pages 6 --out 02_Roadbook/far02.json
+python tools/preview_roadbook.py 02_Roadbook/far02.json
+python tools/roadbook_gen.py 02_Roadbook/far02.json      # -> 02_Roadbook/roadbook.h
+```
 
 ## 八、踩过的坑
 1. `getTextBounds()` 量的是**当前字体**，在 `setFont()` 之前调用会拿到内置 5×7 宽度 → 低估近一半
@@ -118,13 +142,18 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
    保证屏幕上的 `起点+长度` 恒等于终点。
 9. **和 dincalculator 对账的结论（Far02 实测）**：同一份 GPX 两边总距离/总爬升完全一致，
    差异只在口径 —— 网站 route card = **15 条坡 + 13 处补给，零转弯**（按时间/卡路里铺补给）；
-   我们 = 4 条坡（`--climb-merge 1000` 合并 + `--min-gain 60` 丢小坡）+ 4 个**GPX 真实航点** + 8 个转弯。
+   我们（v1.7）= 7 条坡 + 4 个 CP + 8 个 GLU + 5 条大弯。
    星级规则两边是同一套，差的是"喂进去的段"
+10. **别把"有 wpt 就用 wpt"当成"CP 和 GLU 二选一"**（2026-09-18 用户纠正）：
+    CP 是 GPX 里人工标的固定补给点，GLU 是算法推的"该吃胶了"，**两者要在同一张路书上并存**。
+    早先的实现把航点当"补给点来源"，有航点就完全不铺 GLU → 150km/9.5h 只 4 个补给点，明显偏少
 
 ## 九、已知不完美
 - 渲染规则**两份实现**（C 在 `02_Roadbook.ino`，Python 在 `tools/roadbook.py`）靠手抄对齐
 - 电量曲线 3.3V=0% ~ 4.15V=100% 是**按常见锂电拟的，非官方值**
 - PCF85063 断电保持**尚未实测**；固件用编译时刻兜底 + 串口 `T2026-09-11 11:35:00` 手动对时
-- **同一公里数可能撞两行**：Far02 第 1 页 `48.7` 既是 GLU 又是 ↙ 转弯，第 3 页 `82.1`
-  既是爬坡结束公里数又是 GLU。数字没错但屏幕上像重复，**尚未定怎么处理**
+- **转弯方向未经验证**：5 条大弯全被几何判成"急转"（转角 150°+，实际是发夹弯），
+  方向靠 GPX 方位角反推，山路上可能把连续弯误判，**需要用户实地骑一次核对**
+- GLU 是按**里程**铺的（13km 间隔），网站是按**骑行时间**铺的（所以它间隔 12~26km 不均匀）。
+  想要"时间逻辑"得给 GPX 补配速/坡度速度模型，而这份 GPX 没有时间戳
 - 读 PDF 的库装在 `.workbuddy/pylibs/`（pypdf / pymupdf），用 `PYTHONPATH=.workbuddy/pylibs` 调用

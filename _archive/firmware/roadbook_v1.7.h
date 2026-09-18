@@ -1,9 +1,9 @@
-// 自动生成自 02_Roadbook/far02.json —— 不要手改，改完再跑一次生成器
+// 自动生成自 02_Roadbook/fuzhishan.json —— 不要手改，改完再跑一次生成器
 #pragma once
 #include <stdint.h>
 
-const char RB_NAME[] = "FAR02";
-const uint16_t RB_EVENT_COUNT = 25;
+const char RB_NAME[] = "FUZHISHAN";
+const uint16_t RB_EVENT_COUNT = 14;
 
 // 8 个方向箭头（16x16 1-bit，row-major，MSB 在左）
 // 顺序和 RB_DIR_* 常量一致
@@ -17,7 +17,6 @@ const uint16_t RB_EVENT_COUNT = 25;
 #define RB_DIR_DOWN_LEFT 5
 #define RB_DIR_LEFT      6
 #define RB_DIR_UP_LEFT   7
-#define RB_DIR_NONE      255   // dir 字段的哨兵：这一行不画箭头
 
 static const uint8_t RB_ARROWS[8][32] PROGMEM = {
     { 0x00, 0x00, 0x01, 0x00, 0x03, 0x80, 0x03, 0x80, 0x07, 0xC0, 0x07, 0xC0, 0x0F, 0xE0, 0x1F, 0xF0, 0x1F, 0xF0, 0x03, 0x80, 0x03, 0x80, 0x03, 0x80, 0x03, 0x80, 0x03, 0x80, 0x03, 0x80, 0x00, 0x00 },  // up
@@ -39,41 +38,29 @@ static const uint8_t RB_STAR[26] PROGMEM = { 0x00, 0x00, 0x06, 0x00, 0x06, 0x00,
 // 事件（定点整数，无浮点）：
 //   km    /10, 0.1km 精度   length /10   elev  m   grade /10  (0.1%%)
 struct RB_Event {
-    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish 5=halfway 6=cp
-    uint8_t  dir;    // 箭头方向 0..7；255 = 这一行不画箭头
+    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish 5=halfway
+    uint8_t  dir;    // 0..7, only for turn
     uint16_t km;     // 0.1 km
     uint16_t length; // 0.1 km, only for climb
     uint16_t elev;   // m, only for climb
     int16_t  grade;  // 0.1 %%, only for climb (signed)
     uint8_t  stars;  // 1..5, only for climb
-    uint8_t  n;      // CP 编号（cp 事件显示成 "CP<n>"）
 };
 
-static const struct RB_Event RB_EVENTS[25] PROGMEM = {
-    { 0, 6, 70, 0, 0, 0, 0, 0 },  //  1: turn +left
-    { 1, 255, 130, 0, 0, 0, 0, 0 },  //  2: glu
-    { 2, 255, 206, 8, 40, 48, 2, 0 },  //  3: climb 0.8km +40m 4.8% **
-    { 1, 255, 252, 0, 0, 0, 0, 0 },  //  4: glu
-    { 6, 255, 284, 0, 0, 0, 0, 1 },  //  5: CP1
-    { 2, 255, 302, 34, 155, 46, 2, 0 },  //  6: climb 3.4km +155m 4.6% **
-    { 2, 255, 342, 144, 796, 55, 5, 0 },  //  7: climb 14.4km +796m 5.5% *****
-    { 6, 5, 487, 0, 0, 0, 0, 2 },  //  8: CP2
-    { 1, 255, 520, 0, 0, 0, 0, 0 },  //  9: glu
-    { 0, 3, 574, 0, 0, 0, 0, 0 },  // 10: turn +down_right
-    { 1, 255, 650, 0, 0, 0, 0, 0 },  // 11: glu
-    { 2, 255, 720, 8, 44, 49, 2, 0 },  // 12: climb 0.8km +44m 4.9% **
-    { 5, 255, 749, 0, 0, 0, 0, 0 },  // 13: halfway
-    { 2, 255, 762, 32, 129, 40, 2, 0 },  // 14: climb 3.2km +129m 4.0% **
-    { 2, 255, 804, 17, 135, 79, 2, 0 },  // 15: climb 1.7km +135m 7.9% **
-    { 6, 255, 825, 0, 0, 0, 0, 3 },  // 16: CP3
-    { 0, 5, 840, 0, 0, 0, 0, 0 },  // 17: turn +down_left
-    { 1, 255, 910, 0, 0, 0, 0, 0 },  // 18: glu
-    { 1, 255, 1040, 0, 0, 0, 0, 0 },  // 19: glu
-    { 1, 255, 1170, 0, 0, 0, 0, 0 },  // 20: glu
-    { 2, 255, 1247, 116, 637, 55, 5, 0 },  // 21: climb 11.6km +637m 5.5% *****
-    { 6, 255, 1370, 0, 0, 0, 0, 4 },  // 22: CP4
-    { 1, 255, 1426, 0, 0, 0, 0, 0 },  // 23: glu
-    { 0, 3, 1439, 0, 0, 0, 0, 0 },  // 24: turn +down_right
-    { 4, 255, 1506, 0, 0, 0, 0, 0 },  // 25: finish
+static const struct RB_Event RB_EVENTS[14] PROGMEM = {
+    { 0, 6, 33, 0, 0, 0, 0 },  //  1: turn
+    { 2, 0, 137, 39, 237, 61, 3 },  //  2: climb 3.9km +237m 6.1% ***
+    { 0, 5, 186, 0, 0, 0, 0 },  //  3: turn
+    { 0, 2, 247, 0, 0, 0, 0 },  //  4: turn
+    { 1, 0, 250, 0, 0, 0, 0 },  //  5: glu
+    { 2, 0, 359, 91, 474, 52, 5 },  //  6: climb 9.1km +474m 5.2% *****
+    { 0, 3, 464, 0, 0, 0, 0 },  //  7: turn
+    { 5, 0, 480, 0, 0, 0, 0 },  //  8: halfway
+    { 1, 0, 500, 0, 0, 0, 0 },  //  9: glu
+    { 0, 3, 517, 0, 0, 0, 0 },  // 10: turn
+    { 0, 5, 574, 0, 0, 0, 0 },  // 11: turn
+    { 1, 0, 750, 0, 0, 0, 0 },  // 12: glu
+    { 0, 5, 874, 0, 0, 0, 0 },  // 13: turn
+    { 4, 0, 904, 0, 0, 0, 0 },  // 14: finish
 };
 

@@ -33,7 +33,10 @@ TYPE_INDEX = {
     rb.TYPE_DANGER: 3,
     rb.TYPE_FINISH: 4,
     rb.TYPE_HALFWAY: 5,
+    rb.TYPE_CP: 6,
 }
+
+DIR_NONE = 255   # dir 字段的哨兵：这一行不画箭头
 
 
 def gen_h(json_path, h_path):
@@ -62,6 +65,8 @@ def gen_h(json_path, h_path):
     out.append("#define %s_ARROW_BYTES %d" % (P, rb.ARROW_BYTES))
     for i, d in enumerate(DIR_LIST):
         out.append("#define %s_DIR_%-9s %d" % (P, d.upper(), i))
+    out.append("#define %s_DIR_NONE      %d   // dir 字段的哨兵：这一行不画箭头"
+               % (P, DIR_NONE))
     out.append("")
     out.append("static const uint8_t %s_ARROWS[8][%d] PROGMEM = {" % (P, rb.ARROW_BYTES))
     for d, b in zip(DIR_LIST, arrow_bytes):
@@ -79,19 +84,21 @@ def gen_h(json_path, h_path):
     out.append("// 事件（定点整数，无浮点）：")
     out.append("//   km    /10, 0.1km 精度   length /10   elev  m   grade /10  (0.1%%)")
     out.append("struct %s_Event {" % P)
-    out.append("    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish 5=halfway")
-    out.append("    uint8_t  dir;    // 0..7, only for turn")
+    out.append("    uint8_t  type;   // 0=turn 1=glu 2=climb 3=danger 4=finish 5=halfway 6=cp")
+    out.append("    uint8_t  dir;    // 箭头方向 0..7；255 = 这一行不画箭头")
     out.append("    uint16_t km;     // 0.1 km")
     out.append("    uint16_t length; // 0.1 km, only for climb")
     out.append("    uint16_t elev;   // m, only for climb")
     out.append("    int16_t  grade;  // 0.1 %%, only for climb (signed)")
     out.append("    uint8_t  stars;  // 1..5, only for climb")
+    out.append("    uint8_t  n;      // CP 编号（cp 事件显示成 \"CP<n>\"）")
     out.append("};")
     out.append("")
     out.append("static const struct %s_Event %s_EVENTS[%d] PROGMEM = {" % (P, P, len(events)))
     for i, ev in enumerate(events):
         t = TYPE_INDEX[ev["type"].strip().lower()]
-        d = DIR_INDEX[rb.norm_dir(ev.get("dir", "right"))] if t == 0 else 0
+        arw = rb.arrow_of(ev, ev["type"].strip().lower())
+        d = DIR_INDEX[arw] if arw else DIR_NONE
         km10 = int(round(float(ev["km"]) * 10))
         if t == 2:
             length10 = int(round(float(ev.get("length", 0)) * 10))
@@ -101,8 +108,9 @@ def gen_h(json_path, h_path):
                 ev.get("grade"), ev.get("length"))
         else:
             length10 = elev = grade10 = stars = 0
-        out.append("    { %d, %d, %d, %d, %d, %d, %d },  // %2d: %s"
-                   % (t, d, km10, length10, elev, grade10, stars, i + 1, _one_line(ev)))
+        n = int(ev.get("n") or 0) if t == 6 else 0
+        out.append("    { %d, %d, %d, %d, %d, %d, %d, %d },  // %2d: %s"
+                   % (t, d, km10, length10, elev, grade10, stars, n, i + 1, _one_line(ev)))
     out.append("};")
     out.append("")
     with open(h_path, "w", encoding="utf-8") as f:
@@ -111,11 +119,15 @@ def gen_h(json_path, h_path):
 
 
 def _one_line(ev):
-    if ev["type"] == "climb":
+    t = ev["type"].strip().lower()
+    if t == rb.TYPE_CLIMB:
         st = int(ev.get("stars") or 0) or rb.climb_stars(ev.get("grade"), ev.get("length"))
         return "climb %.1fkm +%dm %.1f%% %s" % (
             ev.get("length", 0), ev.get("elev", 0), ev.get("grade", 0), "*" * st)
-    return ev["type"]
+    if t == rb.TYPE_CP:
+        return rb.cp_label(ev)
+    arw = rb.arrow_of(ev, t)
+    return t + (" +" + arw if arw else "")
 
 
 def main():

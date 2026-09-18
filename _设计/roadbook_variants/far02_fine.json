@@ -42,9 +42,17 @@
     {
       "km": 34.2,
       "type": "climb",
-      "length": 14.4,
-      "elev": 796,
-      "grade": 5.5,
+      "length": 1.5,
+      "elev": 73,
+      "grade": 5.0,
+      "stars": 2
+    },
+    {
+      "km": 36.1,
+      "type": "climb",
+      "length": 12.5,
+      "elev": 711,
+      "grade": 5.7,
       "stars": 5
     },
     {
@@ -84,9 +92,17 @@
     {
       "km": 76.2,
       "type": "climb",
-      "length": 3.2,
-      "elev": 129,
-      "grade": 4.0,
+      "length": 1.0,
+      "elev": 45,
+      "grade": 4.3,
+      "stars": 2
+    },
+    {
+      "km": 77.7,
+      "type": "climb",
+      "length": 1.7,
+      "elev": 88,
+      "grade": 5.1,
       "stars": 2
     },
     {
@@ -125,10 +141,18 @@
     {
       "km": 124.7,
       "type": "climb",
-      "length": 11.6,
-      "elev": 637,
-      "grade": 5.5,
+      "length": 9.2,
+      "elev": 517,
+      "grade": 5.7,
       "stars": 5
+    },
+    {
+      "km": 134.2,
+      "type": "climb",
+      "length": 2.1,
+      "elev": 111,
+      "grade": 5.4,
+      "stars": 3
     },
     {
       "km": 137.0,

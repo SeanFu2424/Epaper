@@ -132,9 +132,35 @@ TYPE_CLIMB = "climb"
 TYPE_DANGER = "danger"
 TYPE_FINISH = "finish"
 TYPE_HALFWAY = "halfway"   # 中点提示
+TYPE_CP = "cp"             # 固定补给点（GPX 航点，骑手人工标的真实补给点）
 
 EVENT_TYPES = (TYPE_TURN, TYPE_GLU, TYPE_CLIMB, TYPE_DANGER, TYPE_FINISH,
-               TYPE_HALFWAY)
+               TYPE_HALFWAY, TYPE_CP)
+
+
+def cp_label(ev):
+    """CP 的右列文字：优先用显式 label，否则按序号拼 'CP1' / 'CP2' ...
+
+    为什么补给点要分 cp / glu 两种：
+        cp  = GPX 里作者自己标的固定补给点（有人有店，必须停），编号 CP1..CPn
+        glu = 按时间/里程推算出来的"该吃胶了"的提醒（不一定有店）
+    两者语义不同，屏幕上也不能混 —— 看到 CP 是"这里有补给"，看到 GLU 是"该吃了"。
+    """
+    lab = (ev.get("label") or "").strip()
+    if lab:
+        return lab
+    n = ev.get("n")
+    return "CP%d" % int(n) if n else "CP"
+
+
+def arrow_of(ev, t):
+    """这一行要不要画箭头；不画返回 None。
+
+    turn 事件看 dir；其它事件看 arrow —— 那是"同一个点既要补给又要拐弯"
+    被合并成一行时留下的（见 gpx_to_roadbook.merge_same_km）。
+    """
+    d = ev.get("dir") if t == TYPE_TURN else ev.get("arrow")
+    return norm_dir(d) if d else None
 
 
 def norm_dir(d):
@@ -302,18 +328,21 @@ def event_rows(ev):
         raise ValueError("未知事件类型 %r，V1 只有：%s" % (t, ", ".join(EVENT_TYPES)))
 
     km = fmt_km(ev["km"])
+    arw = arrow_of(ev, t)
 
     if t == TYPE_TURN:
-        return [{"left": km, "right": None, "arrow": norm_dir(ev.get("dir")),
-                 "stars": 0, "sub": False}]
+        return [{"left": km, "right": None, "arrow": arw, "stars": 0, "sub": False}]
     if t == TYPE_GLU:
-        return [{"left": km, "right": "GLU", "arrow": None, "stars": 0, "sub": False}]
+        return [{"left": km, "right": "GLU", "arrow": arw, "stars": 0, "sub": False}]
+    if t == TYPE_CP:
+        return [{"left": km, "right": cp_label(ev), "arrow": arw,
+                 "stars": 0, "sub": False}]
     if t == TYPE_DANGER:
-        return [{"left": km, "right": "DANGER", "arrow": None, "stars": 0, "sub": False}]
+        return [{"left": km, "right": "DANGER", "arrow": arw, "stars": 0, "sub": False}]
     if t == TYPE_FINISH:
-        return [{"left": km, "right": "FINISH", "arrow": None, "stars": 0, "sub": False}]
+        return [{"left": km, "right": "FINISH", "arrow": arw, "stars": 0, "sub": False}]
     if t == TYPE_HALFWAY:
-        return [{"left": km, "right": "HALFWAY", "arrow": None, "stars": 0, "sub": False}]
+        return [{"left": km, "right": "HALFWAY", "arrow": arw, "stars": 0, "sub": False}]
     if t == TYPE_CLIMB:
         stars = int(ev.get("stars") or 0) or climb_stars(ev.get("grade"),
                                                          ev.get("length"))

@@ -9,10 +9,11 @@ Roadbook 预览器 —— 不烧录，在电脑上看 200x200 屏幕长什么样
     │ ────────────────── │  页眉横线                y=22
     │                    │
     │ 22.6 km      CLM 3.1│  正文（自适应行距）      基线 y=38..162
-    │   25.7 km       ★★★│   爬坡第二行 = 结束公里数 + 星级
-    │ 31.0 km         GLU │
-    │ 45.2 km     HALFWAY │   中点
-    │ 40.5 km        ↱    │   转弯（位图箭头）
+    │   25.7     5.1% ★★★│   爬坡第二行 = 结束公里数 + 坡度% + 星级
+    │ 31.0 km          GLU│   该吃胶了（按里程/时间推的）
+    │ 48.7 km        CP2 ↙│   固定补给点（GPX 航点），同点拐弯就并入一行
+    │ 75.3 km      HALFWAY│   中点
+    │ 43.9 km          ↘  │   转弯（位图箭头）
     │                    │
     │ ────────────────── │  页脚横线                y=174
     │ 14:32          87% │  状态栏（时间 / 电量）    基线 y=190
@@ -105,33 +106,44 @@ def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
             c.cursor(lx, y)
             c.print(row["left"])
 
-            if row["arrow"]:
-                px = arrows[row["arrow"]]
-                draw_arrow(c, px, rb.SCREEN_W - rb.MARGIN - rb.ARROW,
-                           y - rb.ARROW + 2)
-                right_w = rb.ARROW
-            elif row.get("stars"):
-                # 爬坡第二行：坡度百分比 + 难度星级（如 "9.1% ★★★★★"），一起右对齐。
-                # 星画在最右，坡度文字紧贴在星左侧（中间留 4px 间距）。
+            # ---- 右列：文字 / 箭头 / 星，可以组合 ----
+            # 组合规则（和固件同一套）：
+            #   星永远贴最右，坡度%写在星左边        -> "9.1% ★★★★★"
+            #   箭头永远贴最右，文字写在箭头左边      -> "CP2 ↙"（同公里数合并行）
+            GAP_A = 6          # 文字和箭头之间的留白
+            arrow_w = rb.ARROW if row["arrow"] else 0
+            txt_w = 0
+            if row["right"]:
+                _x1, _y1, _bw, _bh = f.bounds(row["right"], 0, 0)
+                txt_w = _bw + _x1
+
+            if row.get("stars"):
+                # 爬坡第二行：坡度百分比 + 难度星级，一起右对齐。
                 star_w = rb.star_width(row["stars"])
                 GAP_S = 4
-                # 星右边缘 = SCREEN_W - MARGIN，星左边缘 = 右边缘 - star_w
                 x_right = rb.SCREEN_W - rb.MARGIN
                 x_star_left = x_right - star_w
                 right_w = star_w
-                if row["right"]:
-                    x1, _y1, bw, _bh = f.bounds(row["right"], 0, 0)
-                    txt_w = bw + x1
-                    # 文字右边缘 = 星左边缘 - GAP_S
+                if txt_w:
                     c.cursor(x_star_left - GAP_S - txt_w, y)
                     c.print(row["right"])
                     right_w = star_w + GAP_S + txt_w
                 draw_stars_at(c, star, row["stars"], y, x_right)
-            elif row["right"]:
-                x1, _y1, bw, _bh = f.bounds(row["right"], 0, 0)
-                right_w = bw + x1
-                c.cursor(rb.SCREEN_W - rb.MARGIN - bw - x1, y)
-                c.print(row["right"])
+            elif arrow_w or txt_w:
+                x_right = rb.SCREEN_W - rb.MARGIN
+                if arrow_w:
+                    if txt_w:
+                        c.cursor(x_right - arrow_w - GAP_A - txt_w, y)
+                        c.print(row["right"])
+                        right_w = arrow_w + GAP_A + txt_w
+                    else:
+                        right_w = arrow_w
+                    draw_arrow(c, arrows[row["arrow"]], x_right - arrow_w,
+                               y - rb.ARROW + 2)
+                else:
+                    c.cursor(x_right - txt_w, y)
+                    c.print(row["right"])
+                    right_w = txt_w
             else:
                 right_w = 0
 
@@ -140,10 +152,15 @@ def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
                 _x1, _y1, lw, _lh = f.bounds(row["left"], 0, 0)
                 gapx = (rb.SCREEN_W - rb.MARGIN - right_w) - (lx + lw)
                 if gapx < 4:
-                    rname = row["right"] or "箭头"
+                    parts = []
+                    if row["right"]:
+                        parts.append("'%s'" % row["right"])
+                    if row["arrow"]:
+                        parts.append("箭头")
                     if row.get("stars"):
-                        rname = "%d 颗星" % row["stars"]
-                    warn.append("第 %d 页：'%s' 和 '%s' 只差 %dpx，快撞上了"
+                        parts.append("%d 颗星" % row["stars"])
+                    rname = "+".join(parts) or "?"
+                    warn.append("第 %d 页：'%s' 和 %s 只差 %dpx，快撞上了"
                                 % (idx + 1, row["left"], rname, gapx))
 
             # 这一行墨迹的最低点（用实际字形的 yOffset+height）

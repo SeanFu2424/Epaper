@@ -13,7 +13,10 @@ Arduino IDE 要求 **`.ino` 文件必须放在同名文件夹里**，且一个 s
 
 | 文件 | 对应版本 | 说明 |
 |---|---|---|
-| `02_Roadbook_v1.6.ino` | v2.0 | 当前固件（爬坡星级+坡度%、HALFWAY、页脚状态栏、RTC/ADC） |
+| `02_Roadbook_v1.7.ino` | v1.7 之前 | 改 CP/合并行之前的最后一版（6 事件，far02 18 事件版） |
+| `roadbook_v1.7.h` | v1.7 之前 | 对应头文件（旧结构体，7 字段） |
+| `far02_v1.7.json` | v1.7 之前 | 对应的 FAR02 JSON（18 事件） |
+| `02_Roadbook_v1.6.ino` | v2.0 | 爬坡星级+坡度%、HALFWAY、页脚状态栏、RTC/ADC |
 | `roadbook_v1.6.h` | v2.0 | 对应的路书数据头文件（FUZHISHAN 14 事件） |
 | `fuzhishan_v1.6.json` | v2.0 | 对应的路书 JSON 源 |
 | `EinkRoadbook_V1/` | V1（早期） | 已废弃的 SD 卡方案 |
@@ -23,10 +26,10 @@ Arduino IDE 要求 **`.ino` 文件必须放在同名文件夹里**，且一个 s
 ```bash
 cp 02_Roadbook/02_Roadbook.ino _archive/firmware/02_Roadbook_vX.Y.ino
 cp 02_Roadbook/roadbook.h    _archive/firmware/roadbook_vX.Y.h
-cp 02_Roadbook/fuzhishan.json _archive/firmware/fuzhishan_vX.Y.json
+cp 02_Roadbook/<当前路书>.json _archive/firmware/<路名>_vX.Y.json
 ```
 
-版本号看 `02_Roadbook.ino` 顶部注释（现在是 v1.6 对应 v2.0 标签）。
+版本号看 `02_Roadbook.ino` 顶部注释（当前 v1.7 = 新增 CP 事件 + 同公里数合并成一行）。
 
 ---
 
