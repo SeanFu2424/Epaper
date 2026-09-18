@@ -68,6 +68,10 @@ def gen_h(json_path, h_path):
     out.append("#define %s_DIR_NONE      %d   // dir 字段的哨兵：这一行不画箭头"
                % (P, DIR_NONE))
     out.append("")
+    out.append("// 事件类型编号（固件里用 RB_TYPE_* 判断，别再写裸数字）")
+    for t, i in sorted(TYPE_INDEX.items(), key=lambda kv: kv[1]):
+        out.append("#define %s_TYPE_%-8s %d" % (P, t.upper(), i))
+    out.append("")
     out.append("static const uint8_t %s_ARROWS[8][%d] PROGMEM = {" % (P, rb.ARROW_BYTES))
     for d, b in zip(DIR_LIST, arrow_bytes):
         out.append("    { %s },  // %s" % (", ".join("0x%02X" % x for x in b), d))

@@ -9,7 +9,8 @@ Roadbook 预览器 —— 不烧录，在电脑上看 200x200 屏幕长什么样
     │ ────────────────── │  页眉横线                y=22
     │                    │
     │ 22.6 km      CLM 3.1│  正文（自适应行距）      基线 y=38..162
-    │   25.7     5.1% ★★★│   爬坡第二行 = 结束公里数 + 坡度% + 星级
+    │   24.0          GLU│   坡内提醒（缩进）= 在这块坡里面吃
+    │   25.7     5.1% ★★★│   爬坡末行 = 结束公里数 + 坡度% + 星级
     │ 31.0 km          GLU│   该吃胶了（按里程/时间推的）
     │ 48.7 km        CP2 ↙│   固定补给点（GPX 航点），同点拐弯就并入一行
     │ 75.3 km      HALFWAY│   中点
@@ -79,7 +80,7 @@ def draw_stars(c, px, n, y, warn=None, page=0, left_w=0):
     return w
 
 
-def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
+def render_page(c, idx, page_count, rows, name, f, arrows, star, warn,
                 gap, foot_left, foot_right):
     c.fill(1)
 
@@ -94,79 +95,81 @@ def render_page(c, idx, page_count, events, name, f, arrows, star, warn,
     c.hline(rb.MARGIN, rb.HEADER_LINE_Y, rb.SCREEN_W - 2 * rb.MARGIN, 0)
 
     # ---- 正文：自适应行距，整块垂直居中 ----
-    n_rows = sum(rb.rows_of(e) for e in events)
+    # ⚠️ rows 是**已经展开好的行**（rb.paginate 的产物），不是事件。
+    #    爬坡的两行不一定相邻 —— 坡内的 GLU 夹在中间（见 rb.event_blocks）。
+    #    所以这里逐 "行" 画，不能再逐事件 event_rows()。
+    n_rows = len(rows)
     top, gap = rb.layout(n_rows, gap)
     y = top
     last_bottom = 0
-    for ev in events:
-        for row in rb.event_rows(ev):
-            lx = rb.MARGIN + (rb.SUB_INDENT if row.get("sub") else 0)
+    for row in rows:
+        lx = rb.MARGIN + (rb.SUB_INDENT if row.get("sub") else 0)
 
-            # 左列：公里数
-            c.cursor(lx, y)
-            c.print(row["left"])
+        # 左列：公里数
+        c.cursor(lx, y)
+        c.print(row["left"])
 
-            # ---- 右列：文字 / 箭头 / 星，可以组合 ----
-            # 组合规则（和固件同一套）：
-            #   星永远贴最右，坡度%写在星左边        -> "9.1% ★★★★★"
-            #   箭头永远贴最右，文字写在箭头左边      -> "CP2 ↙"（同公里数合并行）
-            GAP_A = 6          # 文字和箭头之间的留白
-            arrow_w = rb.ARROW if row["arrow"] else 0
-            txt_w = 0
-            if row["right"]:
-                _x1, _y1, _bw, _bh = f.bounds(row["right"], 0, 0)
-                txt_w = _bw + _x1
+        # ---- 右列：文字 / 箭头 / 星，可以组合 ----
+        # 组合规则（和固件同一套）：
+        #   星永远贴最右，坡度%写在星左边        -> "9.1% ★★★★★"
+        #   箭头永远贴最右，文字写在箭头左边      -> "CP2 ↙"（同公里数合并行）
+        GAP_A = 6          # 文字和箭头之间的留白
+        arrow_w = rb.ARROW if row["arrow"] else 0
+        txt_w = 0
+        if row["right"]:
+            _x1, _y1, _bw, _bh = f.bounds(row["right"], 0, 0)
+            txt_w = _bw + _x1
 
-            if row.get("stars"):
-                # 爬坡第二行：坡度百分比 + 难度星级，一起右对齐。
-                star_w = rb.star_width(row["stars"])
-                GAP_S = 4
-                x_right = rb.SCREEN_W - rb.MARGIN
-                x_star_left = x_right - star_w
-                right_w = star_w
+        if row.get("stars"):
+            # 爬坡末行：坡度百分比 + 难度星级，一起右对齐。
+            star_w = rb.star_width(row["stars"])
+            GAP_S = 4
+            x_right = rb.SCREEN_W - rb.MARGIN
+            x_star_left = x_right - star_w
+            right_w = star_w
+            if txt_w:
+                c.cursor(x_star_left - GAP_S - txt_w, y)
+                c.print(row["right"])
+                right_w = star_w + GAP_S + txt_w
+            draw_stars_at(c, star, row["stars"], y, x_right)
+        elif arrow_w or txt_w:
+            x_right = rb.SCREEN_W - rb.MARGIN
+            if arrow_w:
                 if txt_w:
-                    c.cursor(x_star_left - GAP_S - txt_w, y)
+                    c.cursor(x_right - arrow_w - GAP_A - txt_w, y)
                     c.print(row["right"])
-                    right_w = star_w + GAP_S + txt_w
-                draw_stars_at(c, star, row["stars"], y, x_right)
-            elif arrow_w or txt_w:
-                x_right = rb.SCREEN_W - rb.MARGIN
-                if arrow_w:
-                    if txt_w:
-                        c.cursor(x_right - arrow_w - GAP_A - txt_w, y)
-                        c.print(row["right"])
-                        right_w = arrow_w + GAP_A + txt_w
-                    else:
-                        right_w = arrow_w
-                    draw_arrow(c, arrows[row["arrow"]], x_right - arrow_w,
-                               y - rb.ARROW + 2)
+                    right_w = arrow_w + GAP_A + txt_w
                 else:
-                    c.cursor(x_right - txt_w, y)
-                    c.print(row["right"])
-                    right_w = txt_w
+                    right_w = arrow_w
+                draw_arrow(c, arrows[row["arrow"]], x_right - arrow_w,
+                           y - rb.ARROW + 2)
             else:
-                right_w = 0
+                c.cursor(x_right - txt_w, y)
+                c.print(row["right"])
+                right_w = txt_w
+        else:
+            right_w = 0
 
-            # 左右列有没有撞上
-            if row["left"]:
-                _x1, _y1, lw, _lh = f.bounds(row["left"], 0, 0)
-                gapx = (rb.SCREEN_W - rb.MARGIN - right_w) - (lx + lw)
-                if gapx < 4:
-                    parts = []
-                    if row["right"]:
-                        parts.append("'%s'" % row["right"])
-                    if row["arrow"]:
-                        parts.append("箭头")
-                    if row.get("stars"):
-                        parts.append("%d 颗星" % row["stars"])
-                    rname = "+".join(parts) or "?"
-                    warn.append("第 %d 页：'%s' 和 %s 只差 %dpx，快撞上了"
-                                % (idx + 1, row["left"], rname, gapx))
+        # 左右列有没有撞上
+        if row["left"]:
+            _x1, _y1, lw, _lh = f.bounds(row["left"], 0, 0)
+            gapx = (rb.SCREEN_W - rb.MARGIN - right_w) - (lx + lw)
+            if gapx < 4:
+                parts = []
+                if row["right"]:
+                    parts.append("'%s'" % row["right"])
+                if row["arrow"]:
+                    parts.append("箭头")
+                if row.get("stars"):
+                    parts.append("%d 颗星" % row["stars"])
+                rname = "+".join(parts) or "?"
+                warn.append("第 %d 页：'%s' 和 %s 只差 %dpx，快撞上了"
+                            % (idx + 1, row["left"], rname, gapx))
 
-            # 这一行墨迹的最低点（用实际字形的 yOffset+height）
-            _x, oy, _w, oh = f.bounds(row["left"] or row["right"] or "A", 0, 0)
-            last_bottom = max(last_bottom, y + max(0, oy + oh))
-            y += gap
+        # 这一行墨迹的最低点（用实际字形的 yOffset+height）
+        _x, oy, _w, oh = f.bounds(row["left"] or row["right"] or "A", 0, 0)
+        last_bottom = max(last_bottom, y + max(0, oy + oh))
+        y += gap
 
     if last_bottom > rb.FOOT_LINE_Y - 2:
         warn.append("第 %d 页：正文压到页脚横线了（最低 %d，横线 %d）"
@@ -254,10 +257,13 @@ def main():
     data = rb.load(args.json)
     name = data.get("name", "ROADBOOK")
     events = data.get("events", [])
+    # ⚠️ pages 里装的是"行"（已经展开好、且坡内提醒已经夹进爬坡块中间），
+    #    不是事件 —— 逐行画即可，别再调 event_rows()。
     pages = rb.paginate(events, args.rows)
 
     print("路书:   %s" % name)
-    print("事件:   %d 个 -> %d 页   每页最多 %d 行" % (len(events), len(pages), args.rows))
+    print("事件:   %d 个 -> %d 页   每页最多 %d 行（共 %d 行）"
+          % (len(events), len(pages), args.rows, rb.total_rows(events)))
     print("字体:   %s (yAdvance=%d)" % (args.font, f.y_advance))
     print("版式:   正文区 y=%d..%d（%dpx）  页脚横线 y=%d  状态栏基线 y=%d"
           % (rb.BODY_TOP, rb.BODY_BOTTOM, rb.body_region(),
@@ -269,18 +275,17 @@ def main():
     c = pp.Canvas(rb.SCREEN_W, rb.SCREEN_H, glcd)
     warn = []
     imgs = []
-    for i, evs in enumerate(pages):
+    for i, rows in enumerate(pages):
         c.fill(1)
         top, gap_used, last_bottom = render_page(
-            c, i, len(pages), evs, name, f, arrows, star, warn,
+            c, i, len(pages), rows, name, f, arrows, star, warn,
             args.gap, args.time, args.batt)
         img = c.to_image()
         imgs.append(img)
         pp.label_scale(img, args.scale).save(os.path.join(out, "page_%02d.png" % (i + 1)))
-        n_rows = sum(rb.rows_of(e) for e in evs)
         slack = rb.FOOT_LINE_Y - last_bottom
-        print("  第 %d 页：%d 事件 / %d 行   首行基线 %d  行距 %d  距页脚线 %dpx"
-              % (i + 1, len(evs), n_rows, top, gap_used, slack))
+        print("  第 %d 页：%d 行   首行基线 %d  行距 %d  距页脚线 %dpx"
+              % (i + 1, len(rows), top, gap_used, slack))
 
     fa = render_arrows(arrows)
     pp.label_scale(fa, args.scale).save(os.path.join(out, "arrows.png"))

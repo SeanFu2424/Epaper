@@ -8,35 +8,74 @@
       "dir": "left"
     },
     {
-      "km": 28.4,
+      "km": 13.0,
       "type": "glu"
+    },
+    {
+      "km": 20.6,
+      "type": "climb",
+      "length": 0.8,
+      "elev": 40,
+      "grade": 4.8,
+      "stars": 2
+    },
+    {
+      "km": 25.2,
+      "type": "glu"
+    },
+    {
+      "km": 28.4,
+      "type": "cp",
+      "label": "CP1",
+      "name": "固定补给点",
+      "sym": "Generic",
+      "n": 1
     },
     {
       "km": 30.2,
       "type": "climb",
-      "length": 18.4,
-      "elev": 962,
-      "grade": 5.2,
+      "length": 3.4,
+      "elev": 155,
+      "grade": 4.6,
+      "stars": 2
+    },
+    {
+      "km": 34.2,
+      "type": "climb",
+      "length": 14.4,
+      "elev": 796,
+      "grade": 5.5,
       "stars": 5
     },
     {
       "km": 48.7,
+      "type": "cp",
+      "label": "CP2",
+      "name": "补给点1",
+      "sym": "Rest Area",
+      "n": 2,
+      "arrow": "down_left"
+    },
+    {
+      "km": 52.0,
       "type": "glu"
-    },
-    {
-      "km": 48.7,
-      "type": "turn",
-      "dir": "down_left"
-    },
-    {
-      "km": 52.4,
-      "type": "turn",
-      "dir": "down_right"
     },
     {
       "km": 57.4,
       "type": "turn",
       "dir": "down_right"
+    },
+    {
+      "km": 65.0,
+      "type": "glu"
+    },
+    {
+      "km": 72.0,
+      "type": "climb",
+      "length": 0.8,
+      "elev": 44,
+      "grade": 4.9,
+      "stars": 2
     },
     {
       "km": 74.9,
@@ -59,8 +98,12 @@
       "stars": 2
     },
     {
-      "km": 82.1,
-      "type": "glu"
+      "km": 82.5,
+      "type": "cp",
+      "label": "CP3",
+      "name": "补给点2",
+      "sym": "Rest Area",
+      "n": 3
     },
     {
       "km": 84.0,
@@ -68,9 +111,16 @@
       "dir": "down_left"
     },
     {
-      "km": 116.4,
-      "type": "turn",
-      "dir": "right"
+      "km": 91.0,
+      "type": "glu"
+    },
+    {
+      "km": 104.0,
+      "type": "glu"
+    },
+    {
+      "km": 117.0,
+      "type": "glu"
     },
     {
       "km": 124.7,
@@ -82,15 +132,18 @@
     },
     {
       "km": 137.0,
+      "type": "cp",
+      "label": "CP4",
+      "name": "补给点3",
+      "sym": "Rest Area",
+      "n": 4
+    },
+    {
+      "km": 142.6,
       "type": "glu"
     },
     {
       "km": 143.9,
-      "type": "turn",
-      "dir": "down_right"
-    },
-    {
-      "km": 147.6,
       "type": "turn",
       "dir": "down_right"
     },

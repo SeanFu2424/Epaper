@@ -9,6 +9,7 @@ V1 只有 6 种事件：
 排版铁律（改这里 = 预览和屏幕一起改）：
     公里数永远左对齐，事件永远右对齐。
     爬坡是唯一允许占两行的事件；第二行 = 结束公里数（缩进）+ 难度星级。
+    落在爬坡块**内部**的提醒（sub=1 的 GLU）夹在爬坡两行中间，保证公里数递增。
     没有文字也没有位图能画 ★（字体只覆盖 ASCII），所以星级是自制位图。
 
 为什么箭头要自制位图：
@@ -315,8 +316,20 @@ def climb_stars(grade, length_km):
     return 1
 
 
+def _row(km, left, right=None, arrow=None, stars=0, sub=False):
+    """构造一行。
+
+    km 是这一行**实际印出来**的那个数字（不是事件的起点公里数）——
+    爬坡末行印的是结束公里数，所以它这一行的 km 就是终点。
+    留着数字是为了给"公里数必须递增"做自检（见 gpx_to_roadbook.check_row_order）。
+    """
+    return {"km": float(km), "left": left, "right": right, "arrow": arrow,
+            "stars": stars, "sub": sub}
+
+
 def event_rows(ev):
     """把一个事件拆成 1~2 行。每行返回 dict：
+         km    : 这一行印出来的公里数（数字，仅供自检/排序）
          left  : 左列文字（公里数，可能为空）
          right : 右列文字（None 表示画箭头或星级）
          arrow : 方向名（仅 turn）
@@ -327,25 +340,25 @@ def event_rows(ev):
     if t not in EVENT_TYPES:
         raise ValueError("未知事件类型 %r，V1 只有：%s" % (t, ", ".join(EVENT_TYPES)))
 
-    km = fmt_km(ev["km"])
+    kmv = float(ev["km"])
+    km = fmt_km(kmv)
     arw = arrow_of(ev, t)
 
     if t == TYPE_TURN:
-        return [{"left": km, "right": None, "arrow": arw, "stars": 0, "sub": False}]
+        return [_row(kmv, km, None, arw)]
     if t == TYPE_GLU:
         # sub=1：这个 GLU 落在爬坡块内部，缩进显示 —— 表示"在这块坡里面吃"。
-        # 它的公里数天然比爬坡第二行的"结束公里数"小，靠缩进才能读通。
-        return [{"left": km, "right": "GLU", "arrow": arw, "stars": 0,
-                 "sub": bool(ev.get("sub"))}]
+        # 它的公里数天然比爬坡末行的"结束公里数"小，所以显示顺序必须是
+        # 起点行 -> 它 -> 末行（见 event_blocks），否则就是数字倒挂。
+        return [_row(kmv, km, "GLU", arw, sub=bool(ev.get("sub")))]
     if t == TYPE_CP:
-        return [{"left": km, "right": cp_label(ev), "arrow": arw,
-                 "stars": 0, "sub": False}]
+        return [_row(kmv, km, cp_label(ev), arw)]
     if t == TYPE_DANGER:
-        return [{"left": km, "right": "DANGER", "arrow": arw, "stars": 0, "sub": False}]
+        return [_row(kmv, km, "DANGER", arw)]
     if t == TYPE_FINISH:
-        return [{"left": km, "right": "FINISH", "arrow": arw, "stars": 0, "sub": False}]
+        return [_row(kmv, km, "FINISH", arw)]
     if t == TYPE_HALFWAY:
-        return [{"left": km, "right": "HALFWAY", "arrow": arw, "stars": 0, "sub": False}]
+        return [_row(kmv, km, "HALFWAY", arw)]
     if t == TYPE_CLIMB:
         stars = int(ev.get("stars") or 0) or climb_stars(ev.get("grade"),
                                                          ev.get("length"))
@@ -362,32 +375,95 @@ def event_rows(ev):
         end_km_str = "%.1f" % end_km
         grade = ev.get("grade")
         grade_txt = "%.1f%%" % float(grade) if grade not in (None, "") else None
-        return [{"left": km, "right": r1, "arrow": None, "stars": 0, "sub": False},
-                {"left": end_km_str, "right": grade_txt, "arrow": None,
-                 "stars": stars, "sub": True}]
+        return [_row(kmv, km, r1, None),
+                _row(end_km, end_km_str, grade_txt, None, stars=stars, sub=True)]
     raise ValueError(t)
 
 
 def rows_of(ev):
-    """这个事件占几行"""
+    """这个事件自己占几行（不含夹进来的坡内提醒）"""
     return 2 if ev.get("type", "").strip().lower() == TYPE_CLIMB else 1
 
 
+def is_sub_ev(ev):
+    """这个事件是"爬坡块内部的提醒"吗（由 gpx_to_roadbook 打 sub=1 标）"""
+    t = ev.get("type", "").strip().lower()
+    return t != TYPE_CLIMB and bool(ev.get("sub"))
+
+
 # ----------------------------------------------------------------------
-# 分页：爬坡不跨页
+# 分页：以"块"为单位（爬坡块整体不跨页，坡内提醒夹在两行中间）
 # ----------------------------------------------------------------------
+def event_blocks(events):
+    """按显示顺序把事件切成"不可拆分的块" —— 这是分页的最小单位。
+
+    普通事件 = 1 行 = 1 块。
+    爬坡 = 1 块，块内行序固定为：
+
+        [0]     首行：起点公里数 + "CLM <长度>"
+        [1..k]  坡内的提醒（sub=1 的 GLU，按公里数升序）
+        [k+1]   末行：结束公里数 + 坡度% + 星级
+
+    🔴 为什么坡内提醒必须夹在爬坡两行**中间**（用户 2026-09-18 要求）：
+       爬坡末行印的是"结束公里数"，比坡内提醒的公里数大。如果按公里数把
+       提醒排在爬坡块**后面**，屏幕上就是 "34.2 / 48.6 / 43.4" —— 数字倒挂，
+       骑到 43.4 的人会以为路书印错了。夹在中间读起来是 34.2 → 43.4 → 48.6，
+       严格递增，也正好表示"在这块坡的中间吃"。
+
+    固件里的 buildPages() 是同一套逻辑（靠"爬坡后面紧跟若干 sub 事件"切块），
+    所以 gpx_to_roadbook 会保证事件顺序就是这个样子。
+    """
+    evs = sorted(events, key=lambda e: float(e.get("km", 0)))
+    taken = [False] * len(evs)
+    blocks = []
+    for i, e in enumerate(evs):
+        if taken[i]:
+            continue
+        taken[i] = True
+        if e.get("type", "").strip().lower() != TYPE_CLIMB:
+            blocks.append(event_rows(e))
+            continue
+        a = float(e["km"])
+        b = a + float(e.get("length", 0))
+        inner = [j for j in range(len(evs))
+                 if not taken[j] and is_sub_ev(evs[j])
+                 and a < float(evs[j]["km"]) < b]
+        inner.sort(key=lambda j: float(evs[j]["km"]))
+        rows = [event_rows(e)[0]]
+        for j in inner:
+            taken[j] = True
+            rows.extend(event_rows(evs[j]))
+        rows.append(event_rows(e)[1])
+        blocks.append(rows)
+    return blocks
+
+
 def paginate(events, max_rows=MAX_ROWS):
+    """分页。返回 pages —— 每页是一个**行（row dict）列表**，不是事件列表。
+
+    ⚠️ 分页单位是"块"（见 event_blocks），爬坡绝不会被拆到两页
+    （第一页末尾一个 "34.2 CLM 14.4"、第二页开头一个 "48.6 ★"，没法读）。
+    """
     pages, cur, n = [], [], 0
-    for ev in events:
-        r = rows_of(ev)
+    for blk in event_blocks(events):
+        r = len(blk)
         if cur and n + r > max_rows:
             pages.append(cur)
             cur, n = [], 0
-        cur.append(ev)
+        cur.extend(blk)
         n += r
     if cur or not pages:
         pages.append(cur)
     return pages
+
+
+def total_rows(events):
+    """全部事件展开成多少行。
+
+    ⚠️ 坡内提醒（sub=1）自己就是一个事件，占 1 行 —— 它只是**位置**被挪进了
+    爬坡块中间，并不额外多占一行。这里别再给它 +1（会把行数算多）。
+    """
+    return sum(rows_of(e) for e in events)
 
 
 def load(path):

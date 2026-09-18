@@ -1,21 +1,28 @@
 /*
- * Roadbook —— 7 种事件，左右两列，爬坡占两行
+ * Roadbook v1.8 —— 7 种事件，左右两列，爬坡占两行
  *
- * 本版新增（2026-09-18，v1.7）：
+ * 本版新增（2026-09-18，v1.8）：
+ *   1. **坡内提醒排在爬坡两行中间**（用户要求）。分页单位从"事件"改成"块"：
+ *      爬坡块 = 首行(起点 km + CLM 长度) → 坡内 GLU(缩进) → 末行(结束 km + 坡度 + 星级)。
+ *      以前坡内 GLU 被排在爬坡块后面，屏幕上出现 "34.2 / 48.6 / 43.4" 这种数字倒挂。
+ *      现在块内公里数严格递增，块整体不跨页。
+ *   2. 事件的 sub 字段（左列缩进 8px）真正生效 —— 坡内 GLU 用它缩进。
+ *   3. 类型判断改用 roadbook.h 生成的 RB_TYPE_* 常量（不再写裸数字 2）。
+ *
+ * 上一版（v1.7，2026-09-18）：
  *   1. 新增 CP 事件（固定补给点）—— GPX 里作者人工标的真实补给点，
  *      屏幕显示 "CP1".."CPn"。它和 GLU 是两回事：
  *        CP  = 这里有补给（有人有店，必须停）
- *        GLU = 该吃胶了（按里程/时间推的提醒，不一定有店）
+ *        GLU = 该吃胶了（按时间推的提醒，不一定有店）
  *   2. dir 字段语义改成"箭头方向 0..7；RB_DIR_NONE(255) = 不画箭头"，
  *      于是任何事件都能带箭头 —— 同一个点"既要补给又要拐弯"会被
  *      合并成一行显示（如 "48.7 km  CP2 ↙"），不再出现同一公里数两行。
  *
- * 上一版（v1.6，2026-09-11 第二轮）：
- *   1. 爬坡第二行的右列：改成【坡度百分比 + 难度星级】（如 "9.1% ★★★★★"），
- *      爬升高度不上屏，坡度百分比保留
+ * v1.6（2026-09-11 第二轮）：
+ *   1. 爬坡末行的右列：【坡度百分比 + 难度星级】（如 "9.1% ★★★★★"），爬升高度不上屏
  *   2. 新增 HALFWAY 事件（路线中点提示）
  *   3. 不再有补水（H2O）事件
- *   星级和箭头一样是自制 1-bit 位图（字体只覆盖 ASCII，画不出 ★）
+ *   星级和箭头都是自制 1-bit 位图（字体只覆盖 ASCII，画不出 ★）
  *
  * 更早（2026-09-11）：
  *   页脚状态栏 —— 底部一条长横线，线下左侧显示时间，右侧显示电池电量。
@@ -25,7 +32,7 @@
  *       秒寄存器 bit7 = OS 标志，为 1 表示"掉过电，时间不可信"
  *     · 电量：VBAT 经 200K/200K 分压到 GPIO4（= ADC1 通道 3），VBAT = VADC × 2
  *   对时方式：开机时若 RTC 时间无效，自动写入「编译时刻」；
- *             之后可在串口发一行  T2026-09-11 11:35:00  精确对时。
+ *             之后可在串口发一行  T2026-09-18 15:30:00  精确对时。
  *
  *  数据：roadbook.h（tools/roadbook_gen.py 从 JSON 生成，不要手改）
  *  按键：PWR 按下=前进 N 页 / 长按 1.5s 关机；BOOT 按下=后退 N 页
@@ -109,31 +116,55 @@ GxEPD2_BW<GxEPD2_154_GDEY0154D67, GxEPD2_154_GDEY0154D67::HEIGHT>
   display(GxEPD2_154_GDEY0154D67(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 
 // ---- 分页 ----
+// ⚠️ 分页单位是"块"，不是事件（v1.8 改）：
+//      普通事件 = 1 行 = 1 块
+//      爬坡     = 1 块，块内三种行按固定顺序：
+//                  首行    起点公里数 + "CLM <长度>"
+//                  坡内提醒 sub=1 的 GLU（0~n 个，按公里数升序，左列缩进 8px）
+//                  末行    结束公里数 + 坡度% + 星级
+//    为什么坡内提醒要夹在爬坡两行**中间**（用户 2026-09-18 要求）：
+//      末行印的是"结束公里数"，比坡内提醒大。如果按纯公里数把提醒排在爬坡块
+//      **后面**，屏幕就成了 "34.2 / 48.6 / 43.4" —— 数字倒挂，骑到 43.4 的
+//      人会以为路书印错了。夹在中间读起来是 34.2 -> 43.4 -> 48.6，严格递增。
+//    和 tools/roadbook.py 的 event_blocks() 是同一套规则，改一边要改另一边。
 #define MAX_PAGES 24
-uint16_t pageStart[MAX_PAGES];   // 每页起始事件 index
+uint16_t pageStart[MAX_PAGES];   // 每页起始事件 index（一定是某个块的起点）
 uint8_t  pageRows[MAX_PAGES];    // 每页占几"行"
 int      pageCount = 0;
 int      curPage   = 0;
 uint8_t  sinceFull = 0;          // 距上次全刷过了几页（局部刷新用）
 
-static int rowOf(int i) {
-  return pgm_read_byte(&RB_EVENTS[i].type) == 2 ? 2 : 1;   // 2 = climb
+static inline uint8_t evType(int i) { return pgm_read_byte(&RB_EVENTS[i].type); }
+static inline uint8_t evSub(int i)  { return pgm_read_byte(&RB_EVENTS[i].sub); }
+
+// 从事件 i 开始的这一"块"占几行、含几个事件
+static int blockRows(int i, int &nEv) {
+  nEv = 1;
+  if (evType(i) != RB_TYPE_CLIMB) return 1;
+  int rows = 2;                                  // 首行 + 末行
+  for (int j = i + 1; j < (int)RB_EVENT_COUNT; j++) {
+    if (evType(j) == RB_TYPE_CLIMB || !evSub(j)) break;
+    nEv++; rows++;                               // 坡内提醒
+  }
+  return rows;
 }
 
 static void buildPages() {
   pageCount = 0;
   int i = 0, rows = 0;
-  while (i < RB_EVENT_COUNT) {
-    if (i == 0 || rows + rowOf(i) > MAX_ROWS) {
-      pageStart[pageCount] = i;
+  while (i < (int)RB_EVENT_COUNT) {
+    int nEv = 1;
+    int r = blockRows(i, nEv);
+    if (i == 0 || rows + r > MAX_ROWS) {
+      pageStart[pageCount] = (uint16_t)i;
       pageRows[pageCount]  = 0;
       pageCount++;
       rows = 0;
       if (pageCount >= MAX_PAGES) break;
     }
-    rows += rowOf(i);
-    pageRows[pageCount - 1] = rows;
-    i++;
+    rows += r;
+    pageRows[pageCount - 1] = (uint8_t)rows;
+    i += nEv;                                    // 整块跳过（爬坡不跨页）
   }
   if (pageCount == 0) { pageStart[0] = 0; pageRows[0] = 0; pageCount = 1; }
 }
@@ -187,6 +218,80 @@ static void drawGradeStars(int16_t y, int16_t grade10, uint8_t n) {
   display.print(gbuf);
   // 星照旧右对齐画在最右
   drawStars(y, n);
+}
+
+// ---- 画一"行" ----
+// 左列：公里数（sub=1 缩进 8px）。爬坡末行不走这里（它不带 " km" 单位）。
+static void drawKmLeft(int i, int16_t y, uint8_t sub) {
+  uint16_t km10 = pgm_read_word(&RB_EVENTS[i].km);
+  char buf[10];
+  snprintf(buf, sizeof(buf), "%.1f km", km10 / 10.0);
+  display.setCursor(MARGIN + (sub ? SUB_INDENT : 0), y);
+  display.print(buf);
+}
+
+// 普通事件（转弯/GLU/CP/DANGER/FINISH/HALFWAY）：左列公里数 + 右列文字/箭头
+static void drawEventRow(int i, int16_t y) {
+  uint8_t type = evType(i);
+  uint8_t dir  = pgm_read_byte(&RB_EVENTS[i].dir);
+  drawKmLeft(i, y, evSub(i));
+
+  // 右列 = 文字（可能没有） + 箭头（可能没有），都右对齐。
+  //   箭头永远贴最右，文字写在箭头左边 —— 同一个点"既要补给又要拐弯"
+  //   会被合并成一行，所以这两者可以同时出现（如 "48.7 km  CP2 ↙"）。
+  char rbuf[12];
+  const char *txt = NULL;
+  if (type == RB_TYPE_GLU)          txt = "GLU";
+  else if (type == RB_TYPE_DANGER)  txt = "DANGER";
+  else if (type == RB_TYPE_FINISH)  txt = "FINISH";
+  else if (type == RB_TYPE_HALFWAY) txt = "HALFWAY";
+  else if (type == RB_TYPE_CP) {                // 固定补给点（GPX 航点）
+    snprintf(rbuf, sizeof(rbuf), "CP%d", pgm_read_byte(&RB_EVENTS[i].n));
+    txt = rbuf;
+  }
+
+  int arrowW = (dir == RB_DIR_NONE) ? 0 : RB_ARROW_SIZE;
+  int txtW = 0;
+  if (txt) {
+    int16_t bx, by; uint16_t bw, bh;
+    display.getTextBounds(txt, 0, 0, &bx, &by, &bw, &bh);
+    txtW = bw + bx;
+  }
+  int xr = EPD_W - MARGIN;
+  if (arrowW) {
+    if (txt) {
+      display.setCursor(xr - arrowW - GAP_TXT_ARROW - txtW, y);
+      display.print(txt);
+    }
+    display.drawBitmap(xr - arrowW, y - RB_ARROW_SIZE + 2,
+                       RB_ARROWS[dir], RB_ARROW_SIZE, RB_ARROW_SIZE, GxEPD_BLACK);
+  } else if (txt) {
+    display.setCursor(xr - txtW, y);
+    display.print(txt);
+  }
+}
+
+// 爬坡首行：左列起点公里数 + 右列 "CLM <长度>"
+static void drawClimbHead(int i, int16_t y) {
+  drawKmLeft(i, y, 0);
+  uint16_t length10 = pgm_read_word(&RB_EVENTS[i].length);
+  char rbuf[16];
+  snprintf(rbuf, sizeof(rbuf), "CLM %d.%d", length10 / 10, length10 % 10);
+  ralignPrint(y, rbuf);
+}
+
+// 爬坡末行：左列 = 结束公里数（缩进 8px，**不带 " km" 单位** —— 单位首行已给），
+//           右列 = 坡度百分比 + 难度星级（如 "9.1% ★★★★★"，爬升高度不上屏）
+static void drawClimbTail(int i, int16_t y) {
+  uint16_t km10     = pgm_read_word(&RB_EVENTS[i].km);
+  uint16_t length10 = pgm_read_word(&RB_EVENTS[i].length);
+  uint16_t endKm10  = km10 + length10;           // 定点整数相加，零浮点
+  char buf[10];
+  snprintf(buf, sizeof(buf), "%.1f", endKm10 / 10.0);
+  display.setCursor(MARGIN + SUB_INDENT, y);
+  display.print(buf);
+  drawGradeStars(y, (int16_t)pgm_read_word(&RB_EVENTS[i].grade),
+                 pgm_read_byte(&RB_EVENTS[i].stars));
 }
 
 // ---- 状态栏数据：时间（RTC PCF85063） + 电量（ADC） ----
@@ -321,74 +426,24 @@ static void renderPage(int idx) {
     ralignPrint(HEADER_Y, pbuf);
     display.drawFastHLine(MARGIN, HEADER_LINE, EPD_W - 2 * MARGIN, GxEPD_BLACK);
 
-    // ---- 事件 ----
+    // ---- 事件（按"块"画：爬坡块 = 首行 → 坡内提醒 → 末行）----
     int y = top;
-    int end = (idx + 1 < pageCount) ? pageStart[idx + 1] : (int)RB_EVENT_COUNT;
-    for (int i = pageStart[idx]; i < end; i++) {
-      uint8_t type = pgm_read_byte(&RB_EVENTS[i].type);
-      uint8_t dir  = pgm_read_byte(&RB_EVENTS[i].dir);
-      uint8_t sub  = pgm_read_byte(&RB_EVENTS[i].sub);
-      uint16_t km10 = pgm_read_word(&RB_EVENTS[i].km);
-
-      char kmbuf[10];
-      snprintf(kmbuf, sizeof(kmbuf), "%.1f km", km10 / 10.0);
-      // sub=1：左列缩进 8px。用于"落在爬坡块内部的 GLU"—— 它的公里数
-      // 天然比爬坡第二行的"结束公里数"小，靠缩进才能读成"在这块坡里面吃"。
-      display.setCursor(MARGIN + (sub ? SUB_INDENT : 0), y);
-      display.print(kmbuf);
-
-      if (type == 2) {                              // CLIMB —— 两行
-        uint16_t length10 = pgm_read_word(&RB_EVENTS[i].length);
-
-        char rbuf[16];
-        snprintf(rbuf, sizeof(rbuf), "CLM %d.%d", length10 / 10, length10 % 10);
-        ralignPrint(y, rbuf);
-
-        // 第二行：左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7，保留小数点，
-        //       但不带 " km" 单位 —— 单位第一行已给，省 20px），
-        // 右列 = 坡度百分比 + 难度星级（如 "9.1% ★★★★★"；爬升高度不上屏）
+    int end = (idx + 1 < pageCount) ? (int)pageStart[idx + 1] : (int)RB_EVENT_COUNT;
+    for (int i = (int)pageStart[idx]; i < end; ) {
+      if (evType(i) == RB_TYPE_CLIMB) {
+        drawClimbHead(i, y);                 // 首行：起点 km + CLM 长度
         y += gap;
-        uint16_t endKm10 = km10 + length10;          // 定点整数相加，零浮点
-        snprintf(kmbuf, sizeof(kmbuf), "%.1f", endKm10 / 10.0);
-        display.setCursor(MARGIN + SUB_INDENT, y);   // 缩进 = 从属于上面那行
-        display.print(kmbuf);
-
-        drawGradeStars(y, (int16_t)pgm_read_word(&RB_EVENTS[i].grade),
-                       pgm_read_byte(&RB_EVENTS[i].stars));
+        int j = i + 1;
+        while (j < end && evType(j) != RB_TYPE_CLIMB && evSub(j)) {
+          drawEventRow(j, y);                // 坡内提醒：缩进，夹在两行中间
+          y += gap;
+          j++;
+        }
+        drawClimbTail(i, y);                 // 末行：结束 km + 坡度% + 星级
+        i = j;
       } else {
-        // 其它事件：右列 = 文字（可能没有） + 箭头（可能没有），都右对齐。
-        //   箭头永远贴最右，文字写在箭头左边 —— 同一个点"既要补给又要拐弯"
-        //   会被合并成一行，所以这两者可以同时出现（如 "48.7 km  CP2 ↙"）。
-        char rbuf[12];
-        const char *txt = NULL;
-        if (type == 1)      txt = "GLU";             // 该吃胶了（按里程推的）
-        else if (type == 3) txt = "DANGER";
-        else if (type == 4) txt = "FINISH";
-        else if (type == 5) txt = "HALFWAY";
-        else if (type == 6) {                        // CP —— 固定补给点（GPX 航点）
-          snprintf(rbuf, sizeof(rbuf), "CP%d", pgm_read_byte(&RB_EVENTS[i].n));
-          txt = rbuf;
-        }
-
-        int arrowW = (dir == RB_DIR_NONE) ? 0 : RB_ARROW_SIZE;
-        int txtW = 0;
-        if (txt) {
-          int16_t bx, by; uint16_t bw, bh;
-          display.getTextBounds(txt, 0, 0, &bx, &by, &bw, &bh);
-          txtW = bw + bx;
-        }
-        int xr = EPD_W - MARGIN;
-        if (arrowW) {
-          if (txt) {
-            display.setCursor(xr - arrowW - GAP_TXT_ARROW - txtW, y);
-            display.print(txt);
-          }
-          display.drawBitmap(xr - arrowW, y - RB_ARROW_SIZE + 2,
-                             RB_ARROWS[dir], RB_ARROW_SIZE, RB_ARROW_SIZE, GxEPD_BLACK);
-        } else if (txt) {
-          display.setCursor(xr - txtW, y);
-          display.print(txt);
-        }
+        drawEventRow(i, y);
+        i++;
       }
       y += gap;
     }
@@ -537,7 +592,7 @@ void setup() {
   pwrQueue = bootQueue = 0;
   interrupts();
 
-  Serial.printf("boot - roadbook v1.5: \"%s\"  events=%u%s\n",
+  Serial.printf("boot - roadbook v1.8: \"%s\"  events=%u%s\n",
                 RB_NAME, (unsigned)RB_EVENT_COUNT,
                 FAST_PARTIAL ? "  (partial on)" : "");
   // 按键诊断：1 = 没按。按住 PWR 或 BOOT 再上电，这里应该能看到 0

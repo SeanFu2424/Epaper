@@ -600,6 +600,66 @@ def merge_same_km(events, climbs, notes):
     return out
 
 
+def order_sub_after_climb(events):
+    """把"坡内提醒"（sub=1）挪到它所属的爬坡事件**紧后面**。
+
+    tools/roadbook.py 的 event_blocks() 和固件的 buildPages() 都是靠
+    「爬坡后面紧跟若干 sub 事件」来切块的 —— 顺序不对就会切错块
+    （表现是坡内提醒跑到爬坡块外面，屏幕上又是数字倒挂）。
+
+    按公里数排序本来就已经满足（坡内提醒的公里数必然大于爬坡起点），
+    但合并 / 顺延之后不保证，所以这里显式重排一次，把它变成结构性保证。
+    """
+    n = len(events)
+    placed = [False] * n
+    out = []
+    for i, c in enumerate(events):
+        if placed[i]:
+            continue
+        placed[i] = True
+        if c["type"] != "climb":
+            out.append(c)
+            continue
+        a = float(c["km"])
+        b = a + float(c.get("length", 0))
+        inner = []
+        for j in range(i + 1, n):
+            e = events[j]
+            if placed[j] or e["type"] == "climb" or not e.get("sub"):
+                continue
+            if a < float(e["km"]) < b:
+                inner.append(j)
+        inner.sort(key=lambda j: float(events[j]["km"]))
+        out.append(c)
+        for j in inner:
+            placed[j] = True
+            out.append(events[j])
+    # 兜底：万一有事件没被走到（例如同号），按原顺序补上
+    for i, e in enumerate(events):
+        if not placed[i]:
+            out.append(e)
+    return out
+
+
+def check_row_order(events, max_rows=None):
+    """摊开成最终行序，检查每一页的公里数是否严格递增。
+
+    这是"数字倒挂"的最后一道闸。屏幕上出现 "48.6 后面跟 43.4"
+    （爬坡末行的结束公里数比坡内提醒大）就是这里报出来的。
+    返回按页分的告警列表，空 = 通过。
+    """
+    max_rows = max_rows or rb.MAX_ROWS
+    bad = []
+    for pi, rows in enumerate(rb.paginate(events, max_rows)):
+        prev = None
+        for r in rows:
+            if prev is not None and r["km"] < prev - 1e-9:
+                bad.append("第 %d 页：%.1f 后面跟 %.1f —— 公里数倒挂"
+                           % (pi + 1, prev, r["km"]))
+            prev = r["km"]
+    return bad
+
+
 # ======================================================================
 # 主流程
 # ======================================================================
@@ -717,7 +777,10 @@ def build(gpx_path, args):
                          min_gap_km=args.fuel_min_gap,
                          edge_gap_km=args.edge_gap, cp_gap_km=args.cp_gap,
                          in_climb=args.glu_in_climb)
-        if fixed_rows + len(glu) <= args.pages * rb.MAX_ROWS:
+        # 坡内提醒会各自多占一行，页数预算要算上，否则"目标 6 页"会悄悄变 7 页
+        n_inside = len([k for k in glu
+                        if any(a < k < b for a, b in climb_ranges)])
+        if fixed_rows + len(glu) + n_inside <= args.pages * rb.MAX_ROWS:
             break
         interval *= 1.2
 
@@ -752,16 +815,28 @@ def build(gpx_path, args):
     notes = []
     events = merge_same_km(events, climbs, notes)
 
-    # ---- 落在爬坡块内部的 GLU：标成 sub，屏幕上缩进显示 ----
-    # 缩进 = "我属于上面那个爬坡块"。爬坡块第二行印的是结束公里数，
-    # 所以坡内 GLU 的公里数天然比它小 —— 不靠缩进就没法读。
+    # ---- 落在爬坡块内部的 GLU：标成 sub ----
+    # 缩进 = "我属于上面那个爬坡块"。屏幕上这一块的行序是
+    #     首行(起点 km + CLM 长度)  ->  坡内提醒(按 km 升序)  ->  末行(结束 km + 坡度 + 星级)
+    # （见 tools/roadbook.py 的 event_blocks()），所以整块公里数严格递增。
+    # 用户 2026-09-18：缩进可以，但必须夹在两行**中间**，保证按公里数排序。
+    #
+    # ⚠️ 这里用**屏幕上印出来的**爬坡区间（events 里 round 过的那份），
+    #    不是 detect_climbs 的原始浮点区间 —— 否则边界上会差 0.1km 判错。
+    disp_ranges = [(float(e["km"]), float(e["km"]) + float(e.get("length", 0)))
+                   for e in events if e["type"] == "climb"]
     if args.glu_in_climb:
         for e in events:
-            if e["type"] == "glu" and any(a < e["km"] < b for a, b in climb_ranges):
+            if e["type"] == "glu" and any(a < e["km"] < b for a, b in disp_ranges):
                 e["sub"] = 1
 
-    # 合并后重新数一遍行数（合并可能少了几个 GLU）
-    n_rows = sum(2 if e["type"] == "climb" else 1 for e in events)
+    # ---- 把坡内提醒归位（爬坡后面紧跟）并做排序自检 ----
+    events = order_sub_after_climb(events)
+    order_warn = check_row_order(events)
+    n_sub = len([e for e in events if e.get("sub") and e["type"] != "climb"])
+
+    # 合并后重新数一遍行数（合并可能少了几个 GLU；爬坡 2 行 + 坡内提醒 1 行）
+    n_rows = rb.total_rows(events)
 
     data = {
         "name": args.name,
@@ -777,6 +852,8 @@ def build(gpx_path, args):
         "fuel_mode": args.fuel_mode, "t_mov_min": t_mov,
         "speed_scale": args.speed_scale,
         "meta": meta, "n_pts": len(pts),
+        "n_sub": n_sub, "order_warn": order_warn,
+        "n_pages": len(rb.paginate(events, rb.MAX_ROWS)),
         "wpt_proj": wpt_proj, "wpt_moved": wpt_moved, "cp_list": cp_list,
         "glu_km": [e["km"] for e in events if e["type"] == "glu"], "notes": notes,
         "glu_time_txt": (_frame_minutes([e["km"] for e in events if e["type"] == "glu"],
@@ -823,8 +900,8 @@ def main():
     ap.add_argument("--fuel-tail", type=float, default=4.0,
                     help="终点前多少 km 之内不再铺 GLU（默认 4）")
     ap.add_argument("--glu-in-climb", action="store_true",
-                    help="允许 GLU 落在爬坡块内部（屏幕缩进显示）。"
-                         "默认禁止 —— 爬坡块占两行、块内插事件会让公里数看起来倒挂")
+                    help="允许 GLU 落在爬坡块内部（缩进显示，夹在爬坡两行中间，"
+                         "块内公里数仍递增）。默认禁止 —— 长爬坡中途就没有提醒了")
     ap.add_argument("--fuel-spread", type=float, default=5.0,
                     help="目标点放不下时前后找空位的范围(km)")
     ap.add_argument("--fuel-min-gap", type=float, default=7.0,
@@ -918,9 +995,17 @@ def main():
         for n in st["notes"]:
             print("         - %s" % n)
 
-    print("事件   : 共 %d 个 / %d 行 -> 约 %d 页（每页最多 %d 行）"
-          % (st["n_events"], st["n_rows"],
-             (st["n_rows"] + rb.MAX_ROWS - 1) // rb.MAX_ROWS, rb.MAX_ROWS))
+    print("事件   : 共 %d 个 / %d 行 -> %d 页（每页最多 %d 行）"
+          % (st["n_events"], st["n_rows"], st["n_pages"], rb.MAX_ROWS))
+    if st["n_sub"]:
+        print("坡内提醒: %d 个（左列缩进 8px，夹在爬坡两行中间，块内公里数递增）"
+              % st["n_sub"])
+    if st["order_warn"]:
+        print("排序自检: !! 发现公里数倒挂，别烧录：")
+        for w in st["order_warn"]:
+            print("         !! %s" % w)
+    else:
+        print("排序自检: 每一页的公里数都严格递增 ✅")
     print("路名   : %s" % args.name)
     print("已写出 : %s" % out)
     print()

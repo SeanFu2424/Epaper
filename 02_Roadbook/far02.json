@@ -8,7 +8,7 @@
       "dir": "left"
     },
     {
-      "km": 13.0,
+      "km": 17.8,
       "type": "glu"
     },
     {
@@ -18,10 +18,6 @@
       "elev": 40,
       "grade": 4.8,
       "stars": 2
-    },
-    {
-      "km": 25.2,
-      "type": "glu"
     },
     {
       "km": 28.4,
@@ -40,12 +36,22 @@
       "stars": 2
     },
     {
+      "km": 32.8,
+      "type": "glu",
+      "sub": 1
+    },
+    {
       "km": 34.2,
       "type": "climb",
       "length": 14.4,
       "elev": 796,
       "grade": 5.5,
       "stars": 5
+    },
+    {
+      "km": 43.4,
+      "type": "glu",
+      "sub": 1
     },
     {
       "km": 48.7,
@@ -57,16 +63,12 @@
       "arrow": "down_left"
     },
     {
-      "km": 52.0,
-      "type": "glu"
-    },
-    {
       "km": 57.4,
       "type": "turn",
       "dir": "down_right"
     },
     {
-      "km": 65.0,
+      "km": 59.5,
       "type": "glu"
     },
     {
@@ -90,6 +92,11 @@
       "stars": 2
     },
     {
+      "km": 77.1,
+      "type": "glu",
+      "sub": 1
+    },
+    {
       "km": 80.4,
       "type": "climb",
       "length": 1.7,
@@ -111,15 +118,11 @@
       "dir": "down_left"
     },
     {
-      "km": 91.0,
+      "km": 93.4,
       "type": "glu"
     },
     {
-      "km": 104.0,
-      "type": "glu"
-    },
-    {
-      "km": 117.0,
+      "km": 112.1,
       "type": "glu"
     },
     {
@@ -131,6 +134,11 @@
       "stars": 5
     },
     {
+      "km": 127.1,
+      "type": "glu",
+      "sub": 1
+    },
+    {
       "km": 137.0,
       "type": "cp",
       "label": "CP4",
@@ -139,7 +147,7 @@
       "n": 4
     },
     {
-      "km": 142.6,
+      "km": 140.2,
       "type": "glu"
     },
     {
