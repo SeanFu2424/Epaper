@@ -1,4 +1,36 @@
-# 烧录到 ESP32-S3
+# 固件版本归档
+
+> 规则（2026-09-11 起）：**每次要改烧录用的 `.ino` 之前，先把当前版本复制一份进本目录**，
+> 文件名带版本号。这样当前可烧录的永远是 `02_Roadbook/02_Roadbook.ino`，
+> 历史版本随时能从这里找回，不用翻 git。
+
+## 为什么不能直接在 02_Roadbook 里放多个 .ino
+
+Arduino IDE 要求 **`.ino` 文件必须放在同名文件夹里**，且一个 sketch 目录只能有一个主 `.ino`。
+所以"重命名保留旧版本"的正确姿势是：**旧版本挪到 `_archive/firmware/` 存着**，而不是留在原地改名。
+
+## 归档清单
+
+| 文件 | 对应版本 | 说明 |
+|---|---|---|
+| `02_Roadbook_v1.6.ino` | v2.0 | 当前固件（爬坡星级+坡度%、HALFWAY、页脚状态栏、RTC/ADC） |
+| `roadbook_v1.6.h` | v2.0 | 对应的路书数据头文件（FUZHISHAN 14 事件） |
+| `fuzhishan_v1.6.json` | v2.0 | 对应的路书 JSON 源 |
+| `EinkRoadbook_V1/` | V1（早期） | 已废弃的 SD 卡方案 |
+
+## 归档操作（每次改固件前照做）
+
+```bash
+cp 02_Roadbook/02_Roadbook.ino _archive/firmware/02_Roadbook_vX.Y.ino
+cp 02_Roadbook/roadbook.h    _archive/firmware/roadbook_vX.Y.h
+cp 02_Roadbook/fuzhishan.json _archive/firmware/fuzhishan_vX.Y.json
+```
+
+版本号看 `02_Roadbook.ino` 顶部注释（现在是 v1.6 对应 v2.0 标签）。
+
+---
+
+# （以下为早期 V1 SD 卡方案的旧说明，已过时，仅供历史参考）
 
 ## 1. 装好 Arduino IDE
 

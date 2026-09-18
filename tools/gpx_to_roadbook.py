@@ -81,7 +81,12 @@ def smooth(xs, w):
 # 解析
 # ======================================================================
 def parse_gpx(path):
-    """返回 (pts, meta)。pts = [(lat, lon, ele), ...]"""
+    """返回 (pts, meta)。pts = [(lat, lon, ele), ...]
+
+    meta["waypoints"] = [(lat, lon, name, sym), ...]
+    航点是"人工标的提示点"（Strava/规划器导出时常带，<sym> 是图标种类）。
+    补给点如果 GPX 里已经标了，就用真实的，不要再让算法瞎猜。
+    """
     tree = ET.parse(path)
     root = tree.getroot()
     pts, n_time = [], 0
@@ -93,14 +98,51 @@ def parse_gpx(path):
         if tp.find(GPX_NS + "time") is not None:
             n_time += 1
         pts.append((lat, lon, ele))
+
+    waypoints = []
+    for w in root.iter(GPX_NS + "wpt"):
+        nm = w.find(GPX_NS + "name")
+        sy = w.find(GPX_NS + "sym")
+        waypoints.append((
+            float(w.get("lat")), float(w.get("lon")),
+            (nm.text or "").strip() if nm is not None else "",
+            (sy.text or "").strip() if sy is not None else "",
+        ))
+
     nm = root.find(GPX_NS + "metadata/" + GPX_NS + "name")
     meta = {
         "name": (nm.text or "").strip() if nm is not None else "",
         "n_time": n_time,
-        "n_wpt": sum(1 for _ in root.iter(GPX_NS + "wpt")),
+        "n_wpt": len(waypoints),
         "n_rtept": sum(1 for _ in root.iter(GPX_NS + "rtept")),
+        "waypoints": waypoints,
     }
     return pts, meta
+
+
+def project_waypoints(pts, dists, waypoints, max_off_m=300.0):
+    """把航点投影到轨迹上，算出各自的里程（km）。
+
+    做法：找轨迹上离航点最近的一个点，取它的累积里程。
+    （严格说应该投影到"最近线段"上，但对"找它在第几公里"这个用途，
+    最近点已经足够 —— 轨迹点密度约 50m，误差远小于 1km 的路书精度。）
+
+    max_off_m: 航点离轨迹超过这个距离就认为"它不在路线上"（比如另存的兴趣点），
+    丢弃并报告。Strava 正常导出的补给点偏差是 0~5m。
+    """
+    out = []
+    for lat, lon, nm, sy in waypoints:
+        best_i, best_d = 0, float("inf")
+        for i, (plat, plon, _e) in enumerate(pts):
+            dd = haversine(lat, lon, plat, plon)
+            if dd < best_d:
+                best_d, best_i = dd, i
+        if best_d > max_off_m:
+            out.append({"km": None, "name": nm, "sym": sy, "off_m": best_d})
+            continue
+        out.append({"km": round(dists[best_i] / 1000.0, 1), "name": nm,
+                    "sym": sy, "off_m": best_d})
+    return out
 
 
 def cumulative(pts):
@@ -322,8 +364,17 @@ def build(gpx_path, args):
     # 终点前 2km 的转弯没意义（马上就到了，不用再提示转向）
     all_turns = [t for t in all_turns if t["km"] <= total_km - 2.0]
 
-    fuel = place_fuel(total_km, climbs, interval_km=args.fuel_interval,
-                      before_km=args.fuel_before, near_km=args.fuel_near)
+    # ---- 补给点 ----
+    # 优先级：GPX 自带航点（人工标的真实补给点） > 按规则估算。
+    # 覆卮山那条 GPX 没有航点，只能用规则估；这条 Far 02 有 4 个真实补给点。
+    wpt_proj = project_waypoints(pts, dists, meta["waypoints"]) if meta["waypoints"] else []
+    wpt_fuel = [w["km"] for w in wpt_proj if w["km"] is not None]
+    if wpt_fuel and not args.no_wpt:
+        fuel, fuel_src = sorted(set(wpt_fuel)), "wpt"
+    else:
+        fuel = place_fuel(total_km, climbs, interval_km=args.fuel_interval,
+                          before_km=args.fuel_before, near_km=args.fuel_near)
+        fuel_src = "rule"
 
     # 落在爬坡区间里的事件要拿掉。爬坡占两行，第二行写的是"结束公里数"，
     # 里面再插转弯/补给会出现"17.6 后面跟 14.6"这种倒挂，读者会以为写错。
@@ -334,30 +385,59 @@ def build(gpx_path, args):
         return any(a <= k <= b for a, b in climb_ranges)
 
     all_turns = [t for t in all_turns if not _in_climb(t["km"])]
-    fuel = [f for f in fuel if not _in_climb(f)]
+    wpt_moved = []
+    if fuel_src == "rule":
+        # 规则估的补给点落在爬坡里就直接丢弃
+        fuel = [f for f in fuel if not _in_climb(f)]
+    else:
+        # 真实航点不能丢（那是骑手亲自标的店/补给位置），顺延到爬坡结束后一点
+        fixed = []
+        for f in fuel:
+            orig = f
+            for a, b in sorted(climb_ranges):
+                if a <= f <= b:
+                    f = round(b + 0.4, 1)
+                    wpt_moved.append((orig, f))
+                    break
+            fixed.append(f)
+        fuel = sorted(set(fixed))
 
     # 事件预算：爬坡 / 补给 / 中点优先，剩下给转弯
     budget = args.max_events - len(climbs) - len(fuel) - 2   # 2 = 中点 + 终点
     turns = select_turns(all_turns, budget, min_spacing_km=args.turn_spacing)
 
     # ---- 中点提示（HALFWAY）----
-    # 放在路线一半处。不能落在爬坡区间里（爬坡第二行写的是"结束公里数"，
-    # 中间再插一个点会读成倒挂），也不能和邻近事件挤成一团。
-    half = round(total_km / 2.0, 1)
-    if _in_climb(half):
-        for a, b in sorted(climb_ranges):
-            if a <= half <= b:
-                half = round(b + 0.4, 1)
-                break
+    # 两个硬约束：
+    #   ① 绝不能落在爬坡区间内 —— 爬坡第二行写的是"结束公里数"，
+    #      中间再插一个更小的公里数会被读成倒挂
+    #      （真踩过：第 2 页出现 "79.4" 后面跟 "77.7"）
+    #   ② 不能和邻近事件挤在一起（两行贴太近看着乱）
+    #
+    # 做法：真中点 ±8km 每 0.4km 撒候选，过滤掉爬坡区间和拥挤位置，
+    # 取离真中点最近的那个。
+    # ⚠️ 别再用"从真中点一路 +0.4 往后找"的写法：它只检查了起点是否在爬坡里，
+    #    中途会跨过爬坡起点钻进爬坡区间内部（这就是上面那个倒挂 bug 的成因）。
+    half_true = total_km / 2.0
     busy = [c["km"] for c in climbs] + list(fuel) + [t["km"] for t in turns]
     busy += [c["km"] + c["length_km"] for c in climbs]
     busy.append(total_km)
-    for _ in range(20):
-        if all(abs(half - b) >= 1.2 for b in busy):
-            break
-        half = round(half + 0.4, 1)
-    if half >= total_km - 1.0:
-        half = None            # 让到太靠后了，这条提示就没意义了
+
+    cands = []
+    for i in range(-20, 21):
+        k = round(half_true + i * 0.4, 1)
+        if not (1.0 <= k <= total_km - 1.0):
+            continue
+        if _in_climb(k):
+            continue
+        if any(abs(k - b) < 1.2 for b in busy):
+            continue
+        cands.append(k)
+    if cands:
+        half = min(cands, key=lambda x: abs(x - half_true))
+        if abs(half - half_true) > 6.0:
+            half = None        # 让得太远，这条提示就失去"过半"的意义了
+    else:
+        half = None
 
     events = []
     for c in climbs:
@@ -384,6 +464,7 @@ def build(gpx_path, args):
         "n_climb": len(climbs), "n_turn_all": len(all_turns), "n_turn_kept": len(turns),
         "n_fuel": len(fuel), "n_events": len(events), "half_km": half,
         "meta": meta, "n_pts": len(pts),
+        "fuel_src": fuel_src, "wpt_proj": wpt_proj, "wpt_moved": wpt_moved,
     }
     return data, events, climbs, stats
 
@@ -412,6 +493,8 @@ def main():
     ap.add_argument("--fuel-interval", type=float, default=25.0, help="补给间隔(km)")
     ap.add_argument("--fuel-before", type=float, default=3.0, help="爬坡前多少 km 放补给")
     ap.add_argument("--fuel-near", type=float, default=8.0, help="爬坡前多少 km 内的补给会被前移")
+    ap.add_argument("--no-wpt", action="store_true",
+                    help="忽略 GPX 自带航点，强制用规则估算补给点")
     # 总量
     ap.add_argument("--max-events", type=int, default=14, help="事件总数上限（含中点/终点）")
     args = ap.parse_args()
@@ -451,6 +534,25 @@ def main():
     print("转弯   : 候选 %d -> 保留 %d  补给 %d  中点 %s"
           % (st["n_turn_all"], st["n_turn_kept"], st["n_fuel"],
              ("%.1f km" % st["half_km"]) if st["half_km"] else "无"))
+
+    # 补给点来源：GPX 自带航点 还是 规则估算
+    if st["fuel_src"] == "wpt":
+        print("补给   : 来自 GPX 自带航点（真实标记，非算法估算）")
+        for w in st["wpt_proj"]:
+            if w["km"] is None:
+                print("         !! '%s' 离轨迹 %.0f m，判定不在路线上，已忽略"
+                      % (w["name"], w["off_m"]))
+            else:
+                print("         %6.1f km   %-12s (%s)" % (w["km"], w["name"], w["sym"]))
+        for a, b in st["wpt_moved"]:
+            print("         ~  %.1f -> %.1f km（原本落在爬坡内，顺延到爬坡后）" % (a, b))
+    else:
+        if st["meta"]["n_wpt"]:
+            print("补给   : 按规则估算（--no-wpt 已关闭航点；GPX 里有 %d 个航点被忽略）"
+                  % st["meta"]["n_wpt"])
+        else:
+            print("补给   : 按规则估算（GPX 里没有航点）")
+
     print("事件   : 共 %d 个" % st["n_events"])
     print("路名   : %s" % args.name)
     print("已写出 : %s" % out)

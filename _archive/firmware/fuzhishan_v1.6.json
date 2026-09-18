@@ -1,0 +1,77 @@
+{
+  "name": "FUZHISHAN",
+  "note": "由 tools/gpx_to_roadbook.py 生成自 在覆卮山燃烧.gpx",
+  "events": [
+    {
+      "km": 3.3,
+      "type": "turn",
+      "dir": "left"
+    },
+    {
+      "km": 13.7,
+      "type": "climb",
+      "length": 3.9,
+      "elev": 237,
+      "grade": 6.1,
+      "stars": 3
+    },
+    {
+      "km": 18.6,
+      "type": "turn",
+      "dir": "down_left"
+    },
+    {
+      "km": 24.7,
+      "type": "turn",
+      "dir": "right"
+    },
+    {
+      "km": 25.0,
+      "type": "glu"
+    },
+    {
+      "km": 35.9,
+      "type": "climb",
+      "length": 9.1,
+      "elev": 474,
+      "grade": 5.2,
+      "stars": 5
+    },
+    {
+      "km": 46.4,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 48.0,
+      "type": "halfway"
+    },
+    {
+      "km": 50.0,
+      "type": "glu"
+    },
+    {
+      "km": 51.7,
+      "type": "turn",
+      "dir": "down_right"
+    },
+    {
+      "km": 57.4,
+      "type": "turn",
+      "dir": "down_left"
+    },
+    {
+      "km": 75.0,
+      "type": "glu"
+    },
+    {
+      "km": 87.4,
+      "type": "turn",
+      "dir": "down_left"
+    },
+    {
+      "km": 90.4,
+      "type": "finish"
+    }
+  ]
+}

@@ -319,15 +319,19 @@ def event_rows(ev):
                                                          ev.get("length"))
         stars = max(1, min(STAR_MAX, stars))
         r1 = "CLM %.*f" % (1, float(ev.get("length", 0)))
-        # 第二行左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），缩进表示从属于上面那行
-        # 右列 = 难度星级 + 坡度百分比（如 ★★★★★ 9.1%）。
-        #   坡度来自 GPX 的 grade 字段，缺省时用 length/elev 反推不出就不显示。
+        # 第二行左列 = 爬坡结束公里数（22.6 + 3.1 = 25.7），缩进表示从属于上面那行。
+        # ⚠️ 这里**不带 " km" 单位** —— 单位第一行已经给了。
+        #    原因：三位数公里数("136.2 km"=72px) + 间距 + 坡度%("5.5%"=40px)
+        #    + 5 颗星(65px) = 181px，而可用宽度只有 188 - 8(缩进) = 180px，差 1px 就粘连。
+        #    省略单位省 20px，且**不损失任何数字精度**（小数点照留，坡度照留一位小数）。
+        #    试过的其他方案都不如这个：缩小星星（13px 已是可辨认下限，12px 就糊）、
+        #    加速度整数（丢精度）、减缩进（视觉上"从属感"会消失）。
+        end_km = float(ev["km"]) + float(ev.get("length", 0))
+        end_km_str = "%.1f" % end_km
         grade = ev.get("grade")
         grade_txt = "%.1f%%" % float(grade) if grade not in (None, "") else None
-        end_km = float(ev["km"]) + float(ev.get("length", 0))
-        # 爬坡第二行左列 = 结束公里数（保留小数点，如 45.0 km）
         return [{"left": km, "right": r1, "arrow": None, "stars": 0, "sub": False},
-                {"left": fmt_km(end_km), "right": grade_txt, "arrow": None,
+                {"left": end_km_str, "right": grade_txt, "arrow": None,
                  "stars": stars, "sub": True}]
     raise ValueError(t)
 
