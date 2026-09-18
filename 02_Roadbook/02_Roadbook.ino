@@ -327,11 +327,14 @@ static void renderPage(int idx) {
     for (int i = pageStart[idx]; i < end; i++) {
       uint8_t type = pgm_read_byte(&RB_EVENTS[i].type);
       uint8_t dir  = pgm_read_byte(&RB_EVENTS[i].dir);
+      uint8_t sub  = pgm_read_byte(&RB_EVENTS[i].sub);
       uint16_t km10 = pgm_read_word(&RB_EVENTS[i].km);
 
       char kmbuf[10];
       snprintf(kmbuf, sizeof(kmbuf), "%.1f km", km10 / 10.0);
-      display.setCursor(MARGIN, y);
+      // sub=1：左列缩进 8px。用于"落在爬坡块内部的 GLU"—— 它的公里数
+      // 天然比爬坡第二行的"结束公里数"小，靠缩进才能读成"在这块坡里面吃"。
+      display.setCursor(MARGIN + (sub ? SUB_INDENT : 0), y);
       display.print(kmbuf);
 
       if (type == 2) {                              // CLIMB —— 两行

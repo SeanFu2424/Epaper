@@ -31,6 +31,7 @@ GPX -> 路书 JSON（阶段 A：离线纯几何，不联网）
 """
 
 import argparse
+import bisect
 import json
 import math
 import os
@@ -320,15 +321,182 @@ def select_turns(turns, budget, min_spacing_km=3.0):
 #             骑手看到 CP 是"这里有补给"，看到 GLU 是"该吃了"，两码事。
 #
 # 所以本文件的逻辑是：CP 全部来自 wpt；GLU 一律走规则估算（不再二选一）。
-def place_fuel(total_km, climbs, busy, cp_km, interval_km=13.0, spread_km=5.0,
-               step_km=0.4, min_gap_km=7.0, edge_gap_km=1.2,
-               cp_gap_km=3.0, tail_km=4.0):
-    """按里程间隔铺 GLU 提醒，落点要避开：
+# ======================================================================
+# 时间轴：把"距离-高程"剖面换算成"骑到这里花了多少分钟"
+# ======================================================================
+# 为什么需要它：GLU（该吃胶了）本质是**生理节律** —— 每 30~45 分钟补一次，
+# 而不是每 13 公里补一次。按里程铺的结果是"平路补太勤、爬坡补太晚"：
+# 同样 13 km，平路 25 分钟就到了，8% 的陡坡要骑 1 小时。
+#
+# 坡度 -> 速度 经验表（km/h）。⚠️ 这是**通用业余长途骑行的经验值，不是实测**，
+# 用途只是让"同一条路上各段速度不一样"这件事成立（爬坡慢、平路快）。
+# 如果你的实际速度不同，用 --speed-scale 整体缩放（0.8 = 比表里慢 20%）。
+V_GRADE_TABLE = (
+    (-99.0, -3.0, 42.0), (-3.0, -1.0, 38.0), (-1.0, 0.5, 32.0),
+    (0.5, 1.5, 28.0), (1.5, 2.5, 25.0), (2.5, 3.5, 22.0),
+    (3.5, 4.5, 20.0), (4.5, 5.5, 18.0), (5.5, 6.5, 16.0),
+    (6.5, 7.5, 14.5), (7.5, 8.5, 13.0), (8.5, 10.0, 11.5), (10.0, 99.0, 10.0),
+)
 
-    · **爬坡区间**（含前后 edge_gap_km 余量）—— 硬禁区。爬坡块占两行、
+
+def grade_speed(grade_pct, scale=1.0):
+    """给定坡度（%），返回经验速度（km/h）"""
+    for lo, hi, v in V_GRADE_TABLE:
+        if lo <= grade_pct < hi:
+            return v * scale
+    return 10.0 * scale
+
+
+def time_axis(dists, eles, step_m=25.0, win_m=125.0, scale=1.0):
+    """距离-高程剖面 -> 时间轴。
+
+    返回 (grid_km, cum_min)：两者等长，下标 i 表示"骑到 grid_km[i] 公里时
+    累计花了 cum_min[i] 分钟"。用 km_at_min() 可以把时间反算成公里数。
+
+    流程：按 step_m 等距重采样高程 -> ±win_m 中心窗口算坡度 -> 查表得速度
+          -> 用相邻两点的平均速度累加时间。
+    """
+    total_m = dists[-1]
+    n = int(total_m / step_m)
+    grid_m = [i * step_m for i in range(n + 1)]
+
+    def interp(xs, ys, x):
+        i = bisect.bisect_left(xs, x)
+        if i <= 0:
+            return ys[0]
+        if i >= len(xs):
+            return ys[-1]
+        x0, x1 = xs[i - 1], xs[i]
+        if x1 == x0:
+            return ys[i]
+        return ys[i - 1] + (x - x0) / (x1 - x0) * (ys[i] - ys[i - 1])
+
+    eg = [interp(dists, eles, x) for x in grid_m]
+
+    w = max(1, int(round(win_m / step_m)))
+    grade = [0.0] * len(grid_m)
+    for i in range(1, len(grid_m) - 1):
+        a, b = max(0, i - w), min(len(grid_m) - 1, i + w)
+        dd = grid_m[b] - grid_m[a]
+        if dd > 0:
+            grade[i] = (eg[b] - eg[a]) / dd * 100.0
+    if len(grid_m) > 1:
+        grade[0] = grade[1]
+        grade[-1] = grade[-2]
+
+    cum_min = [0.0] * len(grid_m)
+    t = 0.0
+    for i in range(1, len(grid_m)):
+        v = (grade_speed(grade[i - 1], scale) + grade_speed(grade[i], scale)) / 2.0
+        t += (step_m / 1000.0) / v * 60.0
+        cum_min[i] = t
+    grid_km = [x / 1000.0 for x in grid_m]
+    return grid_km, cum_min
+
+
+def km_at_min(grid_km, cum_min, tmin):
+    """时间（分钟）-> 公里数（线性插值）。时间轴是单调的，二分即可。"""
+    lo, hi = 0, len(cum_min) - 1
+    if tmin <= cum_min[0]:
+        return grid_km[0]
+    if tmin >= cum_min[-1]:
+        return grid_km[-1]
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if cum_min[mid] < tmin:
+            lo = mid + 1
+        else:
+            hi = mid
+    if lo == 0:
+        return grid_km[0]
+    t0, t1 = cum_min[lo - 1], cum_min[lo]
+    k0, k1 = grid_km[lo - 1], grid_km[lo]
+    if t1 == t0:
+        return k1
+    return k0 + (tmin - t0) / (t1 - t0) * (k1 - k0)
+
+
+def _frame_minutes(km_list, dists, eles, scale=1.0):
+    """把一串公里数换算成"出发后第几小时几分"，并显示相邻两点的实际间隔。
+
+    只是命令行报表用：让"按时间铺"这件事可核对 —— 避让爬坡/CP 之后，
+    间隔会偏离设定值，一眼能看出来。
+    """
+    if not km_list:
+        return "(无)"
+    grid_km, cum_min = time_axis(dists, eles, scale=scale)
+
+    def min_of(km):
+        lo, hi = 0, len(grid_km) - 1
+        if km <= grid_km[0]:
+            return cum_min[0]
+        if km >= grid_km[-1]:
+            return cum_min[-1]
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if grid_km[mid] < km:
+                lo = mid + 1
+            else:
+                hi = mid
+        k0, k1 = grid_km[lo - 1], grid_km[lo]
+        t0, t1 = cum_min[lo - 1], cum_min[lo]
+        if k1 == k0:
+            return t1
+        return t0 + (km - k0) / (k1 - k0) * (t1 - t0)
+
+    ts = [min_of(k) for k in km_list]
+    txt = "  ".join("%dh%02d" % (t // 60, t % 60) for t in ts)
+    if len(ts) < 2:
+        return txt
+    gaps = " ".join("%.0f" % (ts[i] - ts[i - 1]) for i in range(1, len(ts)))
+    return "%s   （相邻间隔 %s 分钟）" % (txt, gaps)
+
+
+def fuel_cands_km(total_km, args, interval, taxis=None):
+    """算出 GLU 的"目标公里数"候选列表（还没做避让）。
+
+    --fuel-mode km   ：从 interval 公里开始，每 interval 公里一个
+    --fuel-mode time ：从 interval 分钟开始，每 interval 分钟一个
+                       （interval 的单位随模式变成分钟）
+    taxis = time_axis() 的返回值。传进来是为了避免在"页数不够就放大间隔"
+    的循环里反复重算时间轴。
+    返回 (候选公里数列表, 模型全程时间分钟；km 模式为 None)
+    """
+    tail = args.fuel_tail
+    cands, t_mov = [], None
+
+    if args.fuel_mode == "time":
+        grid_km, cum_min = taxis
+        t_mov = cum_min[-1]
+        t = interval
+        while t <= t_mov:
+            k = km_at_min(grid_km, cum_min, t)
+            if k > total_km - tail:
+                break
+            cands.append(round(k, 1))
+            t += interval
+    else:
+        k = interval
+        while k <= total_km - tail:
+            cands.append(round(k, 1))
+            k += interval
+    return cands, t_mov
+
+
+def place_fuel(total_km, climbs, busy, cp_km, cands_km, spread_km=5.0,
+               step_km=0.4, min_gap_km=7.0, edge_gap_km=1.2,
+               cp_gap_km=3.0, tail_km=4.0, in_climb=False):
+    """在一串"目标公里数"上铺 GLU 提醒，落点要避开：
+
+    · **爬坡区间**（含前后 edge_gap_km 余量）—— 默认是硬禁区。爬坡块占两行、
       第二行写的是"结束公里数"，中间插一个更小的公里数会被读成倒挂。
     · busy（转弯 / 中点 / 终点等已占用位置）前后 edge_gap_km
     · cp_km 前后 cp_gap_km —— 已经到真实补给点了，不用再提醒吃胶
+
+    in_climb=True 时**放行爬坡区间**（只躲开坡的起点/终点各 0.6km，
+    免得和爬坡块那两个数字挤在一起）。此时落在坡内的 GLU 会被上层标成
+    sub（缩进显示），读起来是"这块坡里面，第 x 公里处吃胶"。
+    ⚠️ 代价：屏幕上的公里数顺序会出现"48.6 之后跟 45.2"，靠缩进表达从属。
 
     某个目标点放不下时，在 ±spread_km 内按 step_km 找最近的空位；
     再找不到就放弃这个点（宁缺毋滥，别硬挤）。
@@ -337,7 +505,10 @@ def place_fuel(total_km, climbs, busy, cp_km, interval_km=13.0, spread_km=5.0,
 
     def free(x):
         for a, b in climb_ranges:
-            if a - edge_gap_km <= x <= b + edge_gap_km:
+            if in_climb:
+                if abs(x - a) < 0.6 or abs(x - b) < 0.6:
+                    return False
+            elif a - edge_gap_km <= x <= b + edge_gap_km:
                 return False
         for x0 in busy:
             if abs(x - x0) < edge_gap_km:
@@ -348,8 +519,7 @@ def place_fuel(total_km, climbs, busy, cp_km, interval_km=13.0, spread_km=5.0,
         return True
 
     cands = []
-    k = interval_km
-    while k <= total_km - tail_km:
+    for k in cands_km:
         n = int(round(spread_km / step_km))
         hit = None
         for i in range(n + 1):
@@ -364,7 +534,6 @@ def place_fuel(total_km, climbs, busy, cp_km, interval_km=13.0, spread_km=5.0,
                 break
         if hit is not None:
             cands.append(hit)
-        k += interval_km
 
     out = []
     for c in sorted(set(cands)):
@@ -535,12 +704,19 @@ def build(gpx_path, args):
                   + (1 if half is not None else 0) + 1)      # +1 = 终点
     busy2 = [t["km"] for t in turns] + ([half] if half is not None else []) + [total_km]
 
+    # 时间轴只在 time 模式下用，算一次就够（与间隔无关）
+    taxis, t_mov = None, None
+    if args.fuel_mode == "time":
+        taxis = time_axis(dists, eles, scale=args.speed_scale)
+
     glu, interval = [], args.fuel_interval
     for _ in range(10):
-        glu = place_fuel(total_km, climbs, busy2, cp_km,
-                         interval_km=interval, spread_km=args.fuel_spread,
+        cands, t_mov = fuel_cands_km(total_km, args, interval, taxis)
+        glu = place_fuel(total_km, climbs, busy2, cp_km, cands,
+                         spread_km=args.fuel_spread,
                          min_gap_km=args.fuel_min_gap,
-                         edge_gap_km=args.edge_gap, cp_gap_km=args.cp_gap)
+                         edge_gap_km=args.edge_gap, cp_gap_km=args.cp_gap,
+                         in_climb=args.glu_in_climb)
         if fixed_rows + len(glu) <= args.pages * rb.MAX_ROWS:
             break
         interval *= 1.2
@@ -576,6 +752,14 @@ def build(gpx_path, args):
     notes = []
     events = merge_same_km(events, climbs, notes)
 
+    # ---- 落在爬坡块内部的 GLU：标成 sub，屏幕上缩进显示 ----
+    # 缩进 = "我属于上面那个爬坡块"。爬坡块第二行印的是结束公里数，
+    # 所以坡内 GLU 的公里数天然比它小 —— 不靠缩进就没法读。
+    if args.glu_in_climb:
+        for e in events:
+            if e["type"] == "glu" and any(a < e["km"] < b for a, b in climb_ranges):
+                e["sub"] = 1
+
     # 合并后重新数一遍行数（合并可能少了几个 GLU）
     n_rows = sum(2 if e["type"] == "climb" else 1 for e in events)
 
@@ -590,9 +774,14 @@ def build(gpx_path, args):
         "n_cp": len(cp_list), "n_glu": len([e for e in events if e["type"] == "glu"]),
         "n_events": len(events), "n_rows": n_rows, "half_km": half,
         "fp_rows": fixed_rows, "glu_interval": interval,
+        "fuel_mode": args.fuel_mode, "t_mov_min": t_mov,
+        "speed_scale": args.speed_scale,
         "meta": meta, "n_pts": len(pts),
         "wpt_proj": wpt_proj, "wpt_moved": wpt_moved, "cp_list": cp_list,
         "glu_km": [e["km"] for e in events if e["type"] == "glu"], "notes": notes,
+        "glu_time_txt": (_frame_minutes([e["km"] for e in events if e["type"] == "glu"],
+                                        dists, eles, args.speed_scale)
+                         if args.fuel_mode == "time" else ""),
     }
     return data, events, climbs, stats
 
@@ -621,9 +810,21 @@ def main():
                     help="最多保留几个转弯提示（按角度从大到小挑）。默认 5")
     ap.add_argument("--turn-spacing", type=float, default=8.0,
                     help="保留的转弯之间最小间隔(km)。默认 8")
-    # 补给
-    ap.add_argument("--fuel-interval", type=float, default=13.0,
-                    help="GLU 提醒的里程间隔(km)。默认 13（对标 dincalculator 的 12~15）")
+    # 补给（GLU = "该吃胶了"的提醒，和 CP 固定补给点是两件事）
+    ap.add_argument("--fuel-mode", choices=("km", "time"), default="time",
+                    help="GLU 铺点依据：km=按里程（简单但爬坡段会补得太晚），"
+                         "time=按时间（爬坡慢->提醒变密，贴近 dincalculator）。默认 time")
+    ap.add_argument("--fuel-interval", type=float, default=None,
+                    help="GLU 间隔。km 模式单位是 km（默认 13），time 模式单位是"
+                         "分钟（默认 40）。不指定就按模式取默认值")
+    ap.add_argument("--speed-scale", type=float, default=1.0,
+                    help="time 模式下速度模型的整体缩放：0.8 = 比经验表慢 20%%，"
+                         "1.2 = 快 20%%。默认 1.0")
+    ap.add_argument("--fuel-tail", type=float, default=4.0,
+                    help="终点前多少 km 之内不再铺 GLU（默认 4）")
+    ap.add_argument("--glu-in-climb", action="store_true",
+                    help="允许 GLU 落在爬坡块内部（屏幕缩进显示）。"
+                         "默认禁止 —— 爬坡块占两行、块内插事件会让公里数看起来倒挂")
     ap.add_argument("--fuel-spread", type=float, default=5.0,
                     help="目标点放不下时前后找空位的范围(km)")
     ap.add_argument("--fuel-min-gap", type=float, default=7.0,
@@ -638,6 +839,10 @@ def main():
     ap.add_argument("--pages", type=int, default=6,
                     help="目标页数上限（超了就把 GLU 间隔拉大）。默认 6")
     args = ap.parse_args()
+
+    # --fuel-interval 在两个模式下单位不同，不指定就按模式取默认
+    if args.fuel_interval is None:
+        args.fuel_interval = 40.0 if args.fuel_mode == "time" else 13.0
 
     if not os.path.exists(args.gpx):
         sys.exit("找不到 %s" % args.gpx)
@@ -695,8 +900,15 @@ def main():
               % ("有 %d 个但被 --no-wpt 忽略" % st["meta"]["n_wpt"]
                  if st["meta"]["n_wpt"] else "没有", ""))
 
-    print("GLU    : %d 个吃胶提醒（间隔 %0.1f km 起铺，避让爬坡/CP/转弯）"
-          % (st["n_glu"], args.fuel_interval))
+    if st["fuel_mode"] == "time":
+        tm = st["t_mov_min"] or 0.0
+        print("GLU    : %d 个吃胶提醒（按时间铺：每 %.0f 分钟一个；"
+              "模型全程 %dh%02d，速度系数 %.2f）"
+              % (st["n_glu"], st["glu_interval"], tm // 60, tm % 60, st["speed_scale"]))
+        print("         出发后 %s" % st["glu_time_txt"])
+    else:
+        print("GLU    : %d 个吃胶提醒（按里程铺：每 %.1f km 一个，避让爬坡/CP/转弯）"
+              % (st["n_glu"], st["glu_interval"]))
     if st["glu_km"]:
         print("         " + "  ".join("%.1f" % k for k in st["glu_km"]))
     print("中点   : %s" % (("%.1f km" % st["half_km"]) if st["half_km"] else "无"))

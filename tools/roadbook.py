@@ -333,7 +333,10 @@ def event_rows(ev):
     if t == TYPE_TURN:
         return [{"left": km, "right": None, "arrow": arw, "stars": 0, "sub": False}]
     if t == TYPE_GLU:
-        return [{"left": km, "right": "GLU", "arrow": arw, "stars": 0, "sub": False}]
+        # sub=1：这个 GLU 落在爬坡块内部，缩进显示 —— 表示"在这块坡里面吃"。
+        # 它的公里数天然比爬坡第二行的"结束公里数"小，靠缩进才能读通。
+        return [{"left": km, "right": "GLU", "arrow": arw, "stars": 0,
+                 "sub": bool(ev.get("sub"))}]
     if t == TYPE_CP:
         return [{"left": km, "right": cp_label(ev), "arrow": arw,
                  "stars": 0, "sub": False}]

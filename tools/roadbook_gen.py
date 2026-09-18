@@ -92,6 +92,7 @@ def gen_h(json_path, h_path):
     out.append("    int16_t  grade;  // 0.1 %%, only for climb (signed)")
     out.append("    uint8_t  stars;  // 1..5, only for climb")
     out.append("    uint8_t  n;      // CP 编号（cp 事件显示成 \"CP<n>\"）")
+    out.append("    uint8_t  sub;    // 1 = 左列缩进 8px（落在爬坡块内部的 GLU）")
     out.append("};")
     out.append("")
     out.append("static const struct %s_Event %s_EVENTS[%d] PROGMEM = {" % (P, P, len(events)))
@@ -106,11 +107,14 @@ def gen_h(json_path, h_path):
             grade10 = int(round(float(ev.get("grade", 0)) * 10))
             stars = int(ev.get("stars") or 0) or rb.climb_stars(
                 ev.get("grade"), ev.get("length"))
+            sub = 0    # 爬坡的第二行由固件硬编码缩进，不走这个字段
         else:
             length10 = elev = grade10 = stars = 0
+            sub = int(ev.get("sub") or 0)
         n = int(ev.get("n") or 0) if t == 6 else 0
-        out.append("    { %d, %d, %d, %d, %d, %d, %d, %d },  // %2d: %s"
-                   % (t, d, km10, length10, elev, grade10, stars, n, i + 1, _one_line(ev)))
+        out.append("    { %d, %d, %d, %d, %d, %d, %d, %d, %d },  // %2d: %s"
+                   % (t, d, km10, length10, elev, grade10, stars, n, sub,
+                      i + 1, _one_line(ev)))
     out.append("};")
     out.append("")
     with open(h_path, "w", encoding="utf-8") as f:
