@@ -89,6 +89,11 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
 - 不显示当前公里数；右对齐必须 `getTextBounds()` 测宽（非等宽字体手打空格是假的）
 - 不上 ArduinoJson（V2 才上）：省编译时间 + Flash
 - `roadbook.h` 当前由 **fuzhishan.json 或 far02.json**（均为用户真实 GPX）生成
+- **爬坡检测默认值**（`gpx_to_roadbook.py`）：`min_grade=4%`、`min_len=300m`、
+  向前窗口 `250m`、`merge_gap=1000m`（间隔<1km 合并）、`min_gain=60m`（不够就丢）
+  → Far02 150km 出 **4 段**；网站同一份 GPX 出 **15 段**（不合并）
+- **补给默认**：`--fuel-interval 25km`、`--fuel-before 3km`、`--fuel-near 8km`；
+  但**只要有 wpt 航点就优先用真实的**，规则只在没有航点时生效（`--no-wpt` 可强制走规则）
 
 ## 八、踩过的坑
 1. `getTextBounds()` 量的是**当前字体**，在 `setFont()` 之前调用会拿到内置 5×7 宽度 → 低估近一半
@@ -106,8 +111,20 @@ ESP32-S3 墨水屏骑行路书。目标：AI 骑行教练 + 路书（数据源 i
    中转点、转弯、补给点都要过 `_in_climb()` 这一关。
    **顺带**：HALFWAY 原来"从真中点一路 +0.4 往后找"的写法有 bug，它会跨过爬坡起点
    钻进区间内部；改成"±8km 撒候选→过滤禁区→取离真中点最近"才对
+8. **爬坡的 `km` 和 `length` 不能各自 round**：屏幕上的"结束公里数"是 `km + length`
+   反算的（`roadbook.event_rows` / 固件同款），两边各自四舍五入会差 0.1 km
+   （`30.2+18.3=48.5`，真值 `48.5578→48.6`；Far02 上两处踩中）。
+   **正解：先 `end = round(km + length_km, 1)`，再 `length = round(end - km, 1)` 反推**，
+   保证屏幕上的 `起点+长度` 恒等于终点。
+9. **和 dincalculator 对账的结论（Far02 实测）**：同一份 GPX 两边总距离/总爬升完全一致，
+   差异只在口径 —— 网站 route card = **15 条坡 + 13 处补给，零转弯**（按时间/卡路里铺补给）；
+   我们 = 4 条坡（`--climb-merge 1000` 合并 + `--min-gain 60` 丢小坡）+ 4 个**GPX 真实航点** + 8 个转弯。
+   星级规则两边是同一套，差的是"喂进去的段"
 
 ## 九、已知不完美
 - 渲染规则**两份实现**（C 在 `02_Roadbook.ino`，Python 在 `tools/roadbook.py`）靠手抄对齐
 - 电量曲线 3.3V=0% ~ 4.15V=100% 是**按常见锂电拟的，非官方值**
 - PCF85063 断电保持**尚未实测**；固件用编译时刻兜底 + 串口 `T2026-09-11 11:35:00` 手动对时
+- **同一公里数可能撞两行**：Far02 第 1 页 `48.7` 既是 GLU 又是 ↙ 转弯，第 3 页 `82.1`
+  既是爬坡结束公里数又是 GLU。数字没错但屏幕上像重复，**尚未定怎么处理**
+- 读 PDF 的库装在 `.workbuddy/pylibs/`（pypdf / pymupdf），用 `PYTHONPATH=.workbuddy/pylibs` 调用

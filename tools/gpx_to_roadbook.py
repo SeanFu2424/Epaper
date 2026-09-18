@@ -441,8 +441,18 @@ def build(gpx_path, args):
 
     events = []
     for c in climbs:
-        events.append({"km": round(c["km"], 1), "type": "climb",
-                       "length": round(c["length_km"], 1),
+        # ⚠️ 爬坡第二行显示的"结束公里数"是 km + length 反算出来的
+        #    （预览器和固件都是这么算的，见 roadbook.event_rows）。
+        #    如果这里把 km 和 length 各自 round 到 1 位，两者相加就会和真实终点差 0.1：
+        #    真实 30.2133 + 18.3444 = 48.5578 -> 应显示 48.6，
+        #    但 round 后 30.2 + 18.3 = 48.5，屏幕上就印成 48.5（错 0.1 km）。
+        #    Far02 上真踩到两处（48.5 / 136.2）。
+        #    正解：先把**终点**round 到 1 位，再用 end - km 反推 length，
+        #    这样"起点 + 长度"必然等于显示出来的终点，读者能自己验算。
+        km_r = round(c["km"], 1)
+        end_r = round(c["km"] + c["length_km"], 1)
+        events.append({"km": km_r, "type": "climb",
+                       "length": round(end_r - km_r, 1),
                        "elev": c["elev_m"], "grade": c["grade"],
                        "stars": rb.climb_stars(c["grade"], c["length_km"])})
     for f in fuel:
@@ -528,8 +538,10 @@ def main():
           % (st["total_km"], st["raw_gain"], st["sm_gain"]))
     print("爬坡   : %d 段" % st["n_climb"])
     for c in climbs:
-        print("         %6.1f km  %4.1f km  +%3dm  %.1f%%   %s"
-              % (c["km"], c["length_km"], c["elev_m"], c["grade"],
+        # 打印的是"屏幕上会出现的三个数"：起点 / 终点 / 长度
+        _km, _end = round(c["km"], 1), round(c["km"] + c["length_km"], 1)
+        print("         %6.1f -> %6.1f km  %4.1f km  +%3dm  %.1f%%   %s"
+              % (_km, _end, round(_end - _km, 1), c["elev_m"], c["grade"],
                  "*" * rb.climb_stars(c["grade"], c["length_km"])))
     print("转弯   : 候选 %d -> 保留 %d  补给 %d  中点 %s"
           % (st["n_turn_all"], st["n_turn_kept"], st["n_fuel"],
